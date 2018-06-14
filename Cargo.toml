@@ -7,3 +7,4 @@ authors = ["Keith Duncan <keith_duncan@me.com>"]
 clap = "2.31.2"
 tar = "0.4.15"
 libflate = "0.1"
+sha1 = { "version" = "0.6.0", "features" = ["std"]}

@@ -9,6 +9,8 @@ use libflate::gzip::Decoder;
 
 use std::{fs::File, io::Read};
 
+extern crate sha1;
+
 fn main() {
   let matches = App::new("catbus")
     .version("1.0")
@@ -85,16 +87,20 @@ fn index(matches: &clap::ArgMatches) -> MatchResult {
 fn create_index(matches: &clap::ArgMatches) -> MatchResult {
 	let tar_path = matches.value_of("file").unwrap();
 	let mut file = File::open(tar_path).unwrap();
-  let mut decoder = Decoder::new(&mut file).unwrap();
+  let decoder = Decoder::new(&mut file).unwrap();
   let mut a = Archive::new(decoder);
 
   for file in a.entries().unwrap() {
     // Make sure there wasn't an I/O error
     let mut file = file.unwrap();
 
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer).unwrap();
+
+    let sha1 = sha1::Sha1::from(&buffer).hexdigest();
+
     // Inspect metadata about the file
-    println!("{:?}", file.header().path().unwrap());
-    println!("{}", file.header().size().unwrap());
+    println!("{:?} {} {}", file.header().path().unwrap(), file.header().size().unwrap(), sha1);
   }
 
 	Err(())
