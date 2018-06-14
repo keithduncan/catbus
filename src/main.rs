@@ -29,7 +29,7 @@ fn main() {
           .short("f")
           .long("file")
           .value_name("FILE")
-          .help("Tarball file to generate an index of")
+          .help("Path to the tarball file to generate an index of")
           .takes_value(true)
           .required(true)
         )
@@ -37,28 +37,50 @@ fn main() {
           .short("o")
           .long("output")
           .value_name("OUTPUT")
-          .help("Output path to write the index to")
+          .help("Output path to write the index file to")
           .takes_value(true)
           .required(true)
         )
       )
-      .subcommand(SubCommand::with_name("verify")
-        .about("Verify an index file for a tarball")
-        .arg(Arg::with_name("file")
-          .short("f")
-          .long("file")
-          .value_name("FILE")
-          .help("Tarball file to generate an index of")
-          .takes_value(true)
-          .required(true)
+      .subcommand(SubCommand::with_name("transport")
+        .setting(AppSettings::SubcommandRequired)
+        .subcommand(SubCommand::with_name("upload-index")
+          .about("Write an index on stdout, receive part requests on stdin and send those.")
+          .arg(Arg::with_name("file")
+            .short("f")
+            .long("file")
+            .value_name("FILE")
+            .help("Path to the tarball file to transport to the remote peer")
+            .takes_value(true)
+            .required(true)
+          )
+          .arg(Arg::with_name("index")
+            .short("i")
+            .long("index")
+            .value_name("INDEX")
+            .help("Path to the index file to transport to the remote peer")
+            .takes_value(true)
+            .required(true)
+          )
         )
-        .arg(Arg::with_name("index")
-          .short("i")
-          .long("index")
-          .value_name("INDEX")
-          .help("Path to the index to use for verification")
-          .takes_value(true)
-          .required(true)
+        .subcommand(SubCommand::with_name("receive-index")
+          .about("Receive an index on stdin, construct a tarball using a library of parts or request parts over stdout.")
+          .arg(Arg::with_name("destination")
+            .short("d")
+            .long("destination")
+            .value_name("DESTINATION")
+            .help("Path to the directory of tarball and index files to use for tarball construction, and ultimate tarball write")
+            .takes_value(true)
+            .required(true)
+          )
+          .arg(Arg::with_name("file")
+            .short("f")
+            .long("file")
+            .value_name("FILE")
+            .help("File name to create in the destination directory")
+            .takes_value(true)
+            .required(true)
+          )
         )
       )
     )
@@ -66,6 +88,8 @@ fn main() {
 
   let result = if let Some(matches) = matches.subcommand_matches("index") {
     index(matches)
+  } else if let Some(matches) = matches.subcommand_matches("transport") {
+    transport(matches)
   } else {
     Err(())
   };
@@ -81,8 +105,6 @@ type MatchResult = Result<(), ()>;
 fn index(matches: &clap::ArgMatches) -> MatchResult {
   if let Some(matches) = matches.subcommand_matches("create") {
     create_index(matches)
-  } else if let Some(matches) = matches.subcommand_matches("verify") {
-    verify_index(matches)
   } else {
     Err(())
   }
@@ -127,6 +149,26 @@ fn create_index(matches: &clap::ArgMatches) -> MatchResult {
   Ok(())
 }
 
-fn verify_index(matches: &clap::ArgMatches) -> MatchResult {
+fn transport(matches: &clap::ArgMatches) -> MatchResult {
+  if let Some(matches) = matches.subcommand_matches("upload-index") {
+    upload_index(matches)
+  } else if let Some(matches) = matches.subcommand_matches("receive-index") {
+    receive_index(matches)
+  } else {
+    Err(())
+  }
+}
+
+fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
+  let tar_path = matches.value_of("file").unwrap();
+  let index_path = matches.value_of("index").unwrap();
+
+  Err(())
+}
+
+fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
+  let destination_path = matches.value_of("destination").unwrap();
+  let file = matches.value_of("file").unwrap();
+
   Err(())
 }
