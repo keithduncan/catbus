@@ -71,7 +71,7 @@ fn main() {
   };
 
   match result {
-    Err(()) => println!("Unknown command"),
+    Err(()) => panic!("Unknown command"),
     _ => {}
   }
 }
