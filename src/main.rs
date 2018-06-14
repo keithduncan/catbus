@@ -4,9 +4,6 @@ use clap::{Arg, App, AppSettings, SubCommand};
 extern crate tar;
 use tar::Archive;
 
-extern crate libflate;
-use libflate::gzip::Decoder;
-
 use std::{fs::File, io::Read};
 
 extern crate sha1;
@@ -86,11 +83,10 @@ fn index(matches: &clap::ArgMatches) -> MatchResult {
 
 fn create_index(matches: &clap::ArgMatches) -> MatchResult {
 	let tar_path = matches.value_of("file").unwrap();
-	let mut file = File::open(tar_path).unwrap();
-  let decoder = Decoder::new(&mut file).unwrap();
-  let mut a = Archive::new(decoder);
+	let file = File::open(tar_path).unwrap();
+  let mut archive = Archive::new(file);
 
-  for file in a.entries().unwrap() {
+  for file in archive.entries().unwrap() {
     // Make sure there wasn't an I/O error
     let mut file = file.unwrap();
 
