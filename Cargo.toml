@@ -1,0 +1,8 @@
+[package]
+name = "catbus"
+version = "0.1.0"
+authors = ["Keith Duncan <keith_duncan@me.com>"]
+
+[dependencies]
+clap = "2.31.2"
+tar = "0.4.15"
