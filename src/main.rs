@@ -4,9 +4,12 @@ use clap::{Arg, App, AppSettings, SubCommand};
 extern crate tar;
 use tar::{Archive, Builder};
 
-use std::{fs::File, io, io::{Read, Write}};
+use std::{fs::File, io, io::Write};
 
 extern crate sha1;
+use sha1::{Sha1, Digest};
+
+extern crate digest;
 
 fn main() {
   let matches = App::new("catbus")
@@ -93,11 +96,9 @@ fn generate_index(tar_path: &str) -> io::Result<Vec<u8>> {
     // Make sure there wasn't an I/O error
     let mut file = file.unwrap();
 
-    let mut file_contents = Vec::new();
-    file.read_to_end(&mut file_contents).unwrap();
-    let file_sha1 = sha1::Sha1::from(&file_contents).digest().bytes();
+    let file_hash = Sha1::digest_reader(&mut file).unwrap();
 
-    builder.append(file.header(), file_sha1.as_ref()).unwrap();
+    builder.append(file.header(), file_hash.as_ref()).unwrap();
   }
 
   builder.into_inner()

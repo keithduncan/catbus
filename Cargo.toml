@@ -6,4 +6,5 @@ authors = ["Keith Duncan <keith_duncan@me.com>"]
 [dependencies]
 clap = "2.31.2"
 tar = "0.4.15"
-sha1 = { "version" = "0.6.0", "features" = ["std"] }
+sha-1 = "0.7.0"
+digest = { version = "0.7", features = ["std"] }
