@@ -96,10 +96,10 @@ fn create_index(matches: &clap::ArgMatches) -> MatchResult {
     let sha1 = sha1::Sha1::from(&buffer).hexdigest();
 
     // Inspect metadata about the file
-    println!("{:?} {} {}", file.header().path().unwrap(), file.header().size().unwrap(), sha1);
+    println!("{:?} {:?} {} {}", file.header().entry_type(), file.header().path().unwrap(), file.header().size().unwrap(), sha1);
   }
 
-	Err(())
+	Ok(())
 }
 
 fn verify_index(matches: &clap::ArgMatches) -> MatchResult {
