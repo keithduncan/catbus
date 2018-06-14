@@ -4,7 +4,10 @@ use clap::{Arg, App, AppSettings, SubCommand};
 extern crate tar;
 use tar::{Archive, Builder};
 
-use std::{fs::File, io, io::Write};
+extern crate libflate;
+use libflate::gzip;
+
+use std::{fs::File, io::Write};
 
 extern crate sha1;
 use sha1::{Sha1, Digest};
@@ -85,9 +88,10 @@ fn index(matches: &clap::ArgMatches) -> MatchResult {
   }
 }
 
-fn generate_index(tar_path: &str) -> io::Result<Vec<u8>> {
+fn generate_index(tar_path: &str) -> Vec<u8> {
   let buffer = Vec::new();
-  let mut builder = Builder::new(buffer);
+  let encoder = gzip::Encoder::new(buffer).unwrap();
+  let mut builder = Builder::new(encoder);
 
   let file = File::open(tar_path).unwrap();
   let mut archive = Archive::new(file);
@@ -96,12 +100,21 @@ fn generate_index(tar_path: &str) -> io::Result<Vec<u8>> {
     // Make sure there wasn't an I/O error
     let mut file = file.unwrap();
 
-    let file_hash = Sha1::digest_reader(&mut file).unwrap();
+    let mut new_header = file.header().clone();
 
-    builder.append(file.header(), file_hash.as_ref()).unwrap();
+    if file.header().entry_type() == tar::EntryType::Regular {
+      let file_hash = Sha1::digest_reader(&mut file).unwrap();
+
+      new_header.set_size(file_hash.len() as u64);
+      new_header.set_cksum();
+
+      builder.append(&new_header, file_hash.as_ref()).unwrap();
+    } else {
+      builder.append(&new_header, file).unwrap();
+    }
   }
 
-  builder.into_inner()
+  builder.into_inner().unwrap().finish().into_result().unwrap()
 }
 
 fn create_index(matches: &clap::ArgMatches) -> MatchResult {
@@ -109,7 +122,7 @@ fn create_index(matches: &clap::ArgMatches) -> MatchResult {
   let index_path = matches.value_of("output").unwrap();
 
   let mut index_file = File::create(index_path).unwrap();
-  index_file.write_all(&generate_index(tar_path).unwrap()).unwrap();
+  index_file.write_all(&generate_index(tar_path)).unwrap();
 
   Ok(())
 }
