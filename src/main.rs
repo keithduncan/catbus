@@ -161,19 +161,25 @@ fn transport(matches: &clap::ArgMatches) -> MatchResult {
   }
 }
 
+fn write_tarball<R: ?Sized, W: ?Sized>(r: &mut R, w: &mut W) -> io::Result<()>
+  where R: Read, W: Write {
+  let mut tarball = Vec::new();
+  r.read_to_end(&mut tarball)?;
+  w.write_fmt(format_args!("{}\0", tarball.len()))?;
+  w.write(&tarball)?;
+  w.flush()
+}
+
 fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   let tar_path = matches.value_of("file").unwrap();
   let index_path = matches.value_of("index").unwrap();
 
-  // Send the index
-
-  let mut index_file = File::open(index_path).unwrap();
-  let mut index = Vec::new();
-  index_file.read_to_end(&mut index).unwrap();
-
+  // Output on stdout
   let mut stdout = io::stdout();
-  stdout.write_fmt(format_args!("{}\0", index.len())).unwrap();
-  stdout.write(&index).unwrap();
+
+  // Send the index first
+  let mut index_file = File::open(index_path).unwrap();
+  write_tarball(&mut index_file, &mut stdout).unwrap();
 
   // Wait to read requested parts on stdin
   let stdin = BufReader::new(io::stdin());
