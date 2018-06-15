@@ -200,6 +200,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   // Read the index
 
   let mut stdin = BufReader::new(io::stdin());
+  let mut stdout = io::stdout();
 
   let mut size_buffer = Vec::new();
   stdin.read_until(b'\0', &mut size_buffer).expect("read length");
@@ -229,10 +230,21 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
     if file.header().entry_type() == tar::EntryType::Regular {
       // Append to want list
       eprintln!("WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
+
+      stdout.write_fmt(format_args!("{}\n", file.path().unwrap().to_str().unwrap())).unwrap();
     } else {
       builder.append(&new_header, file).unwrap();
     }
   }
+
+  stdout.flush().unwrap();
+  unsafe {
+    libc::close(1);
+  }
+
+  // Read another length prefixed tarball on stdin
+
+  // Append the entries from the new tarball
 
   let mut file = builder.into_inner().unwrap();
   file.flush().unwrap();
