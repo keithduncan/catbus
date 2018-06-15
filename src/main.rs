@@ -190,17 +190,19 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   let mut stdout = io::stdout();
 
   // Send the index first
+  eprintln!("[upload-index] sending index");
   let mut index_file = File::open(index_path).unwrap();
   write_tarball(&mut index_file, &mut stdout).unwrap();
 
   let mut want_list = Vec::new();
 
   // Wait to read requested parts on stdin
+  eprintln!("[upload-index] reading WANT");
   let stdin = BufReader::new(io::stdin());
   stdin.lines().for_each(|line| {
     let line = line.unwrap();
     // For each wanted entry append it to the want list
-    eprintln!("WANTED {:?}", line);
+    eprintln!("[upload-index] WANTED {:?}", line);
     want_list.push(line.to_string())
   });
 
@@ -231,6 +233,7 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
 
   let want_output = &want_builder.into_inner().unwrap();
 
+  eprintln!("[upload-index] sending wanted");
   write_tarball(&mut want_output.as_slice(), &mut stdout).unwrap();
   unsafe {
     libc::close(1);
@@ -253,6 +256,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   let mut output_builder = Builder::new(output);
 
   // Read the index
+  eprintln!("[receive-index] receiving index");
   let index = read_tarball(&mut stdin).unwrap();
 
   // The index is always compressed
@@ -272,7 +276,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
       // in destination_path
 
       // Tell sender we want it
-      eprintln!("WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
+      eprintln!("[receive-index] WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
       stdout.write_fmt(format_args!("{}\n", file.path().unwrap().to_str().unwrap())).unwrap();
     } else {
       output_builder.append(&new_header, file).unwrap();
@@ -286,6 +290,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   }
 
   // Read the tarball of wanted parts
+  eprintln!("[receive-index] receiving wanted");
   let want = read_tarball(&mut stdin).unwrap();
 
   // Append it to the archive we've built it
@@ -297,6 +302,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
     output_builder.append(&new_header, file).unwrap();
   }
 
+  eprintln!("[receive-index] writing output");
   let mut output = output_builder.into_inner().unwrap();
   output.flush().unwrap();
 
