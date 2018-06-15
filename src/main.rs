@@ -1,3 +1,5 @@
+extern crate libc;
+
 extern crate clap;
 use clap::{Arg, App, AppSettings, SubCommand};
 
@@ -174,7 +176,19 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   stdout.write(&index).unwrap();
 
   // Wait to read requested parts on stdin
-  // Look them up in tar_path
+  let stdin = BufReader::new(io::stdin());
+  stdin.lines().for_each(|line| {
+    eprintln!("WANTED {:?}", line)
+
+    // For each wanted entry append it to the want list
+  });
+
+  // Iterate the tar_path archive and accumulate the wanted entries
+
+  // Write another length prefixed tarball to stdout and then close stdout
+  unsafe {
+    libc::close(1);
+  }
 
   Ok(())
 }
