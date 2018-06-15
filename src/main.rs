@@ -214,7 +214,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
 
     if file.header().entry_type() == tar::EntryType::Regular {
       // Append to want list
-      println!("WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
+      eprintln!("WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
     } else {
       builder.append(&new_header, file).unwrap();
     }
