@@ -9,7 +9,19 @@ use tar::{Archive, Builder};
 extern crate libflate;
 use libflate::gzip;
 
-use std::{path::PathBuf, fs::File, str, io, io::{Read, Write, BufRead, BufReader}};
+use std::{
+  path::PathBuf,
+  fs::File,
+  str,
+  io::{
+    self,
+    Read,
+    Write,
+    BufRead,
+    BufReader
+  },
+  collections::BTreeSet,
+};
 
 extern crate sha1;
 use sha1::{Sha1, Digest};
@@ -183,18 +195,18 @@ fn read_tarball<T: Read>(r: &mut BufReader<T>) -> io::Result<Vec<u8>> {
 }
 
 fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
-  let tar_path = matches.value_of("file").unwrap();
-  let index_path = matches.value_of("index").unwrap();
+  let tar_path = matches.value_of("file").expect("file arg required");
+  let index_path = matches.value_of("index").expect("index arg required");
 
   // Output on stdout
   let mut stdout = io::stdout();
 
   // Send the index first
   eprintln!("[upload-index] sending index");
-  let mut index_file = File::open(index_path).unwrap();
-  write_tarball(&mut index_file, &mut stdout).unwrap();
+  let mut index_file = File::open(index_path).expect("index file present");
+  write_tarball(&mut index_file, &mut stdout).expect("write index to receive-index");
 
-  let mut want_list = Vec::new();
+  let mut want_list = BTreeSet::new();
 
   // Wait to read requested parts on stdin
   eprintln!("[upload-index] reading WANT");
@@ -203,22 +215,23 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
     let line = line.unwrap();
     // For each wanted entry append it to the want list
     eprintln!("[upload-index] WANTED {:?}", line);
-    want_list.push(line.to_string())
+    want_list.insert(PathBuf::from(line));
   });
 
   // Iterate the tar_path archive and accumulate the wanted entries
-  let tar_file = File::open(tar_path).unwrap();
+  let tar_file = File::open(tar_path).expect("tar file present");
   let mut tar_archive = Archive::new(tar_file);
 
   let want_output = Vec::new();
   let mut want_builder = Builder::new(want_output);
 
+  eprintln!("[upload-index] generating wanted");
   for file in tar_archive.entries().expect("entries") {
     let mut file = file.unwrap();
 
     {
       let file_path = file.path().unwrap();
-      if want_list.iter().position(|e| e.as_str() == file_path.as_ref().to_string_lossy()) == None {
+      if !want_list.contains(&file_path.to_path_buf()) {
         continue;
       }
     }
@@ -234,7 +247,7 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   let want_output = &want_builder.into_inner().unwrap();
 
   eprintln!("[upload-index] sending wanted");
-  write_tarball(&mut want_output.as_slice(), &mut stdout).unwrap();
+  write_tarball(&mut want_output.as_slice(), &mut stdout).expect("write wanted to receive-index");
   unsafe {
     libc::close(1);
   }
@@ -243,21 +256,21 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
 }
 
 fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
-  let destination_path = matches.value_of("destination").unwrap();
-  let destination_file = matches.value_of("file").unwrap();
+  let destination_path = matches.value_of("destination").expect("destination arg required");
+  let destination_file = matches.value_of("file").expect("file arg required");
 
   let mut stdin = BufReader::new(io::stdin());
   let mut stdout = io::stdout();
 
   // Destination we're going to write a full tarball to
-  let mut output_path = PathBuf::from(destination_file);
+  let mut output_path = PathBuf::from(destination_path);
   output_path.push(destination_file);
-  let output = File::create(output_path).unwrap();
+  let output = File::create(output_path).expect("create output file");
   let mut output_builder = Builder::new(output);
 
   // Read the index
   eprintln!("[receive-index] receiving index");
-  let index = read_tarball(&mut stdin).unwrap();
+  let index = read_tarball(&mut stdin).expect("read index from upload-index");
 
   // The index is always compressed
   let decoder = gzip::Decoder::new(index.as_slice()).expect("gzip decoder");
@@ -291,7 +304,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
 
   // Read the tarball of wanted parts
   eprintln!("[receive-index] receiving wanted");
-  let want = read_tarball(&mut stdin).unwrap();
+  let want = read_tarball(&mut stdin).expect("read wanted from upload-index");
 
   // Append it to the archive we've built it
   let mut want_archive = Archive::new(want.as_slice());
@@ -303,7 +316,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   }
 
   eprintln!("[receive-index] writing output");
-  let mut output = output_builder.into_inner().unwrap();
+  let mut output = output_builder.into_inner().expect("write output");
   output.flush().unwrap();
 
   Ok(())
