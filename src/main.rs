@@ -126,39 +126,39 @@ fn index(matches: &clap::ArgMatches) -> MatchResult {
 
 fn generate_index(tar_path: &str) -> Vec<u8> {
   let buffer = Vec::new();
-  let encoder = gzip::Encoder::new(buffer).unwrap();
+  let encoder = gzip::Encoder::new(buffer).expect("encoder");
   let mut builder = Builder::new(encoder);
 
-  let file = File::open(tar_path).unwrap();
+  let file = File::open(tar_path).expect("open archive");
   let mut archive = Archive::new(file);
 
-  for file in archive.entries().unwrap() {
+  for file in archive.entries().expect("entries") {
     // Make sure there wasn't an I/O error
-    let mut file = file.unwrap();
+    let mut file = file.expect("entry file");
 
     let mut new_header = file.header().clone();
 
     if file.header().entry_type() == tar::EntryType::Regular {
-      let file_hash = Sha1::digest_reader(&mut file).unwrap();
+      let file_hash = Sha1::digest_reader(&mut file).expect("file digest");
 
       new_header.set_size(file_hash.len() as u64);
       new_header.set_cksum();
 
-      builder.append(&new_header, file_hash.as_ref()).unwrap();
+      builder.append(&new_header, file_hash.as_ref()).expect("append file digest entry");
     } else {
-      builder.append(&new_header, file).unwrap();
+      builder.append(&new_header, file).expect("append entry");
     }
   }
 
-  builder.into_inner().unwrap().finish().into_result().unwrap()
+  builder.into_inner().expect("finish archive").finish().into_result().expect("finish compress")
 }
 
 fn create_index(matches: &clap::ArgMatches) -> MatchResult {
-  let tar_path = matches.value_of("file").unwrap();
-  let index_path = matches.value_of("output").unwrap();
+  let tar_path = matches.value_of("file").expect("file arg required");
+  let index_path = matches.value_of("output").expect("output arg required");
 
-  let mut index_file = File::create(index_path).unwrap();
-  index_file.write_all(&generate_index(tar_path)).unwrap();
+  let mut index_file = File::create(index_path).expect("create index file");
+  index_file.write_all(&generate_index(tar_path)).expect("write index file");
 
   Ok(())
 }
@@ -186,7 +186,7 @@ fn read_tarball<T: Read>(r: &mut BufReader<T>) -> io::Result<Vec<u8>> {
   let mut size_buffer = Vec::new();
   r.read_until(b'\0', &mut size_buffer)?;
   let ascii = &size_buffer[0..size_buffer.len()-1];
-  let tarball_length = str::from_utf8(ascii).unwrap().parse::<usize>().unwrap();
+  let tarball_length = str::from_utf8(ascii).expect("length prefix is uft8").parse::<usize>().expect("parse length prefix");
 
   let mut tarball = vec![0u8; tarball_length];
   r.read_exact(tarball.as_mut_slice())?;
@@ -212,7 +212,7 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   eprintln!("[upload-index] reading WANT");
   let stdin = BufReader::new(io::stdin());
   stdin.lines().for_each(|line| {
-    let line = line.unwrap();
+    let line = line.expect("read line");
     // For each wanted entry append it to the want list
     eprintln!("[upload-index] WANTED {:?}", line);
     want_list.insert(PathBuf::from(line));
@@ -227,24 +227,24 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
 
   eprintln!("[upload-index] generating wanted");
   for file in tar_archive.entries().expect("entries") {
-    let mut file = file.unwrap();
+    let mut file = file.expect("entry file");
 
     {
-      let file_path = file.path().unwrap();
+      let file_path = file.path().expect("entry path");
       if !want_list.contains(&file_path.to_path_buf()) {
         continue;
       }
     }
 
     let mut file_content = Vec::new();
-    file.read_to_end(&mut file_content).unwrap();
+    file.read_to_end(&mut file_content).expect("read entry content");
 
     let mut new_header = file.header().clone();
 
-    want_builder.append(&new_header, file).unwrap();
+    want_builder.append(&new_header, file).expect("append entry to wanted");
   }
 
-  let want_output = &want_builder.into_inner().unwrap();
+  let want_output = &want_builder.into_inner().expect("finish wanted archive");
 
   eprintln!("[upload-index] sending wanted");
   write_tarball(&mut want_output.as_slice(), &mut stdout).expect("write wanted to receive-index");
@@ -277,10 +277,10 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   let mut index_archive = Archive::new(decoder);
 
   for file in index_archive.entries().expect("entries") {
-    let mut file = file.unwrap();
+    let mut file = file.expect("entry file");
 
     let mut file_hash = Vec::new();
-    file.read_to_end(&mut file_hash).unwrap();
+    file.read_to_end(&mut file_hash).expect("read entry content");
 
     let mut new_header = file.header().clone();
 
@@ -290,14 +290,14 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
 
       // Tell sender we want it
       eprintln!("[receive-index] WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
-      stdout.write_fmt(format_args!("{}\n", file.path().unwrap().to_str().unwrap())).unwrap();
+      stdout.write_fmt(format_args!("{}\n", file.path().expect("entry path").to_str().expect("to str"))).expect("write wanted entry");
     } else {
-      output_builder.append(&new_header, file).unwrap();
+      output_builder.append(&new_header, file).expect("append entry to output");
     }
   }
 
   // Tell the sender EOF so they send the want parts
-  stdout.flush().unwrap();
+  stdout.flush().expect("flush wanted entries");
   unsafe {
     libc::close(1);
   }
@@ -309,15 +309,15 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   // Append it to the archive we've built it
   let mut want_archive = Archive::new(want.as_slice());
   for file in want_archive.entries().expect("entries") {
-    let mut file = file.unwrap();
+    let mut file = file.expect("wanted entry");
 
     let mut new_header = file.header().clone();
-    output_builder.append(&new_header, file).unwrap();
+    output_builder.append(&new_header, file).expect("append wanted entry");
   }
 
   eprintln!("[receive-index] writing output");
   let mut output = output_builder.into_inner().expect("write output");
-  output.flush().unwrap();
+  output.flush().expect("flush output");
 
   Ok(())
 }
