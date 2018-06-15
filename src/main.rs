@@ -7,7 +7,7 @@ use tar::{Archive, Builder};
 extern crate libflate;
 use libflate::gzip;
 
-use std::{fs::File, str, io, io::{Read, Write, BufRead, BufReader}};
+use std::{path::PathBuf, fs::File, str, io, io::{Read, Write, BufRead, BufReader}};
 
 extern crate sha1;
 use sha1::{Sha1, Digest};
@@ -174,6 +174,7 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   stdout.write(&index).unwrap();
 
   // Wait to read requested parts on stdin
+  // Look them up in tar_path
 
   Ok(())
 }
@@ -197,6 +198,11 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   let decoder = gzip::Decoder::new(index.as_slice()).expect("gzip decoder");
   let mut index_archive = Archive::new(decoder);
 
+  let mut file_path = PathBuf::from(destination_path);
+  file_path.push(file);
+  let file = File::create(file_path).unwrap();
+  let mut builder = Builder::new(file);
+
   for file in index_archive.entries().expect("entries") {
     // Make sure there wasn't an I/O error
     let mut file = file.unwrap();
@@ -204,8 +210,18 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
     let mut file_hash = Vec::new();
     file.read_to_end(&mut file_hash).unwrap();
 
-    println!("{:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
+    let mut new_header = file.header().clone();
+
+    if file.header().entry_type() == tar::EntryType::Regular {
+      // Append to want list
+      println!("WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
+    } else {
+      builder.append(&new_header, file).unwrap();
+    }
   }
+
+  let mut file = builder.into_inner().unwrap();
+  file.flush().unwrap();
 
   Ok(())
 }
