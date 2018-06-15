@@ -170,6 +170,18 @@ fn write_tarball<R: ?Sized, W: ?Sized>(r: &mut R, w: &mut W) -> io::Result<()>
   w.flush()
 }
 
+fn read_tarball<T: Read>(r: &mut BufReader<T>) -> io::Result<Vec<u8>> {
+  let mut size_buffer = Vec::new();
+  r.read_until(b'\0', &mut size_buffer)?;
+  let ascii = &size_buffer[0..size_buffer.len()-1];
+  let tarball_length = str::from_utf8(ascii).unwrap().parse::<usize>().unwrap();
+
+  let mut tarball = vec![0u8; tarball_length];
+  r.read_exact(tarball.as_mut_slice())?;
+
+  Ok(tarball)
+}
+
 fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   let tar_path = matches.value_of("file").unwrap();
   let index_path = matches.value_of("index").unwrap();
@@ -181,17 +193,45 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   let mut index_file = File::open(index_path).unwrap();
   write_tarball(&mut index_file, &mut stdout).unwrap();
 
+  let mut want_list = Vec::new();
+
   // Wait to read requested parts on stdin
   let stdin = BufReader::new(io::stdin());
   stdin.lines().for_each(|line| {
-    eprintln!("WANTED {:?}", line)
-
+    let line = line.unwrap();
     // For each wanted entry append it to the want list
+    eprintln!("WANTED {:?}", line);
+    want_list.push(line.to_string())
   });
 
   // Iterate the tar_path archive and accumulate the wanted entries
+  let tar_file = File::open(tar_path).unwrap();
+  let mut tar_archive = Archive::new(tar_file);
 
-  // Write another length prefixed tarball to stdout and then close stdout
+  let want_output = Vec::new();
+  let mut want_builder = Builder::new(want_output);
+
+  for file in tar_archive.entries().expect("entries") {
+    let mut file = file.unwrap();
+
+    {
+      let file_path = file.path().unwrap();
+      if want_list.iter().position(|e| e.as_str() == file_path.as_ref().to_string_lossy()) == None {
+        continue;
+      }
+    }
+
+    let mut file_content = Vec::new();
+    file.read_to_end(&mut file_content).unwrap();
+
+    let mut new_header = file.header().clone();
+
+    want_builder.append(&new_header, file).unwrap();
+  }
+
+  let want_output = &want_builder.into_inner().unwrap();
+
+  write_tarball(&mut want_output.as_slice(), &mut stdout).unwrap();
   unsafe {
     libc::close(1);
   }
@@ -201,31 +241,25 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
 
 fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   let destination_path = matches.value_of("destination").unwrap();
-  let file = matches.value_of("file").unwrap();
-
-  // Read the index
+  let destination_file = matches.value_of("file").unwrap();
 
   let mut stdin = BufReader::new(io::stdin());
   let mut stdout = io::stdout();
 
-  let mut size_buffer = Vec::new();
-  stdin.read_until(b'\0', &mut size_buffer).expect("read length");
-  let ascii = &size_buffer[0..size_buffer.len()-1];
+  // Destination we're going to write a full tarball to
+  let mut output_path = PathBuf::from(destination_file);
+  output_path.push(destination_file);
+  let output = File::create(output_path).unwrap();
+  let mut output_builder = Builder::new(output);
 
-  let index_length = str::from_utf8(ascii).unwrap().parse::<usize>().unwrap();
-  let mut index = vec![0u8; index_length];
-  stdin.read_exact(index.as_mut_slice()).expect("read index");
+  // Read the index
+  let index = read_tarball(&mut stdin).unwrap();
 
+  // The index is always compressed
   let decoder = gzip::Decoder::new(index.as_slice()).expect("gzip decoder");
   let mut index_archive = Archive::new(decoder);
 
-  let mut file_path = PathBuf::from(destination_path);
-  file_path.push(file);
-  let file = File::create(file_path).unwrap();
-  let mut builder = Builder::new(file);
-
   for file in index_archive.entries().expect("entries") {
-    // Make sure there wasn't an I/O error
     let mut file = file.unwrap();
 
     let mut file_hash = Vec::new();
@@ -234,26 +268,37 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
     let mut new_header = file.header().clone();
 
     if file.header().entry_type() == tar::EntryType::Regular {
-      // Append to want list
-      eprintln!("WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
+      // TODO try to find entry from the local library of parts
+      // in destination_path
 
+      // Tell sender we want it
+      eprintln!("WANT {:?} {:?} {:?} {:x?}", file.header().entry_type(), file.path(), file.header().size(), file_hash);
       stdout.write_fmt(format_args!("{}\n", file.path().unwrap().to_str().unwrap())).unwrap();
     } else {
-      builder.append(&new_header, file).unwrap();
+      output_builder.append(&new_header, file).unwrap();
     }
   }
 
+  // Tell the sender EOF so they send the want parts
   stdout.flush().unwrap();
   unsafe {
     libc::close(1);
   }
 
-  // Read another length prefixed tarball on stdin
+  // Read the tarball of wanted parts
+  let want = read_tarball(&mut stdin).unwrap();
 
-  // Append the entries from the new tarball
+  // Append it to the archive we've built it
+  let mut want_archive = Archive::new(want.as_slice());
+  for file in want_archive.entries().expect("entries") {
+    let mut file = file.unwrap();
 
-  let mut file = builder.into_inner().unwrap();
-  file.flush().unwrap();
+    let mut new_header = file.header().clone();
+    output_builder.append(&new_header, file).unwrap();
+  }
+
+  let mut output = output_builder.into_inner().unwrap();
+  output.flush().unwrap();
 
   Ok(())
 }
