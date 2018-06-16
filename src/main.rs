@@ -271,12 +271,9 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   let mut output_path = destination_path.clone();
   output_path.push(destination_file);
 
-  let mut index_file = File::create(index_path).expect("create index file");
-
   // Read the index
-  eprintln!("[receive-index] receiving index");
+  eprintln!("[receive-index] receiving index tarball");
   let index = read_tarball("[receive-index]", &mut stdin).expect("read index from upload-index");
-  index_file.write_all(&index).expect("write index to destination");
 
   // The index is always compressed
   let decoder = gzip::Decoder::new(index.as_slice()).expect("gzip decoder");
@@ -334,6 +331,10 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   eprintln!("[receive-index] writing output tarball");
   let mut output = output_builder.into_inner().expect("write output");
   output.flush().expect("flush output");
+
+  let mut index_file = File::create(index_path).expect("create index file");
+  eprintln!("[receive-index] writing index tarball");
+  index_file.write_all(&index).expect("write index to destination");
 
   Ok(())
 }
