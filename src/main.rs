@@ -286,15 +286,19 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
 
     let mut new_header = file.header().clone();
 
-    if file.header().entry_type() == tar::EntryType::Regular {
+    if new_header.entry_type() == tar::EntryType::Regular {
       // TODO try to find entry from the local library of parts
       // in destination_path
 
+      let entry_path = file.path().expect("entry path");
+      let entry_path = entry_path.to_str().expect("to str");
+
       // Tell sender we want it
       eprintln!("[receive-index] WANT {:?} {:?} {:x?}", new_header.entry_type(), entry_path, file_hash);
-      stdout.write_fmt(format_args!("{}\n", file.path().expect("entry path").to_str().expect("to str"))).expect("write wanted entry");
+      stdout.write_fmt(format_args!("{}\n", entry_path)).expect("write wanted entry");
     } else {
-      output_builder.append(&new_header, file).expect("append entry to output");
+      let entry_path = file.path().expect("entry path").into_owned();
+      output_builder.append_data(&mut new_header, entry_path, file).expect("append entry to output");
     }
   }
 
