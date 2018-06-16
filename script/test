@@ -9,4 +9,4 @@ rm -f tmp/pipe
 mkfifo tmp/pipe
 trap "rm tmp/pipe" EXIT
 
-$binary transport upload-index --file tmp/builds/3e9743acfb2781c1432f0811542d1f9bc0655aef-jessie-x86_64.tar --index tmp/builds/3e9743acfb2781c1432f0811542d1f9bc0655aef-jessie-x86_64.tar.idx <tmp/pipe | $binary transport receive-index --destination tmp/output --file 3e9743acfb2781c1432f0811542d1f9bc0655aef-jessie-x86_64.tar >tmp/pipe
+$binary transport upload-index --file tmp/builds/3e9743acfb2781c1432f0811542d1f9bc0655aef-jessie-x86_64.tar --index tmp/builds/3e9743acfb2781c1432f0811542d1f9bc0655aef-jessie-x86_64.tar.idx <tmp/pipe 2>tmp/upload-err | $binary transport receive-index --destination tmp/output --file 3e9743acfb2781c1432f0811542d1f9bc0655aef-jessie-x86_64.tar >tmp/pipe 2>tmp/receive-err
