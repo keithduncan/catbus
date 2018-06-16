@@ -258,25 +258,32 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
 }
 
 fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
-  let destination_path = matches.value_of("destination").expect("destination arg required");
+  let destination_path = PathBuf::from(matches.value_of("destination").expect("destination arg required"));
   let destination_file = matches.value_of("file").expect("file arg required");
 
   let mut stdin = BufReader::new(io::stdin());
   let mut stdout = io::stdout();
 
   // Destination we're going to write a full tarball to
-  let mut output_path = PathBuf::from(destination_path);
+  let mut index_path = destination_path.clone();
+  index_path.push(format!("{}.idx", destination_file));
+
+  let mut output_path = destination_path.clone();
   output_path.push(destination_file);
-  let output = File::create(output_path).expect("create output file");
-  let mut output_builder = Builder::new(output);
+
+  let mut index_file = File::create(index_path).expect("create index file");
 
   // Read the index
   eprintln!("[receive-index] receiving index");
   let index = read_tarball("[receive-index]", &mut stdin).expect("read index from upload-index");
+  index_file.write_all(&index).expect("write index to destination");
 
   // The index is always compressed
   let decoder = gzip::Decoder::new(index.as_slice()).expect("gzip decoder");
   let mut index_archive = Archive::new(decoder);
+
+  let output_file = File::create(output_path).expect("create output file");
+  let mut output_builder = Builder::new(output_file);
 
   for file in index_archive.entries().expect("entries") {
     let mut file = file.expect("entry file");
