@@ -327,7 +327,8 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
     eprintln!("[receive-index] receiving {:?}", file.path().expect("entry path"));
 
     let mut new_header = file.header().clone();
-    output_builder.append(&new_header, file).expect("append wanted entry");
+    let entry_path = file.path().expect("entry path").into_owned();
+    output_builder.append_data(&mut new_header, entry_path, file).expect("append wanted entry");
   }
 
   eprintln!("[receive-index] writing output");
