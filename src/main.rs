@@ -136,6 +136,7 @@ fn generate_index(tar_path: &str) -> Vec<u8> {
     // Make sure there wasn't an I/O error
     let mut file = file.expect("entry file");
 
+    let file_path = file.path().expect("entry path").into_owned();
     let mut new_header = file.header().clone();
 
     if file.header().entry_type() == tar::EntryType::Regular {
@@ -144,9 +145,9 @@ fn generate_index(tar_path: &str) -> Vec<u8> {
       new_header.set_size(file_hash.len() as u64);
       new_header.set_cksum();
 
-      builder.append(&new_header, file_hash.as_ref()).expect("append file digest entry");
+      builder.append_data(&mut new_header, file_path, file_hash.as_ref()).expect("append file digest entry");
     } else {
-      builder.append(&new_header, file).expect("append entry");
+      builder.append_data(&mut new_header, file_path, file).expect("append entry");
     }
   }
 
