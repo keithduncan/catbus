@@ -6,10 +6,12 @@ use std::{
   io::{
     self,
     BufReader,
+    BufWriter,
     Read,
     Write,
   },
   fs::File,
+  collections::BTreeMap,
 };
 
 use tarball_codec;
@@ -21,22 +23,22 @@ use self::libflate::gzip;
 
 extern crate libc;
 
-enum ArchiveEntry<'a> {
+enum ArchiveEntry {
   Concrete {
-    header: &'a tar::Header,
-    path: &'a Path,
-    bytes: &'a [u8],
+    header: tar::Header,
+    path: PathBuf,
+    bytes: Vec<u8>,
   },
   Lookup {
-    header: &'a tar::Header,
-    path: &'a Path,
-    digest: &'a [u8]
+    header: tar::Header,
+    path: PathBuf,
+    digest: Vec<u8>,
   },
 }
 
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
   let mut stdin = BufReader::new(io::stdin());
-  let mut stdout = io::stdout();
+  let mut stdout = BufWriter::new(io::stdout());
 
   // Destination we're going to write a full tarball to
   let mut index_path = PathBuf::from(destination_path);
@@ -53,31 +55,58 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   let decoder = gzip::Decoder::new(index.as_slice())?;
   let mut index_archive = tar::Archive::new(decoder);
 
-  let output_file = File::create(output_path)?;
-  let mut output_builder = tar::Builder::new(output_file);
+  // Collect the list of lookup
+  let mut want_list = BTreeMap::new();
 
-  for file in index_archive.entries()? {
-    let mut file = file.expect("entry file");
+  let archive_entries: Vec<ArchiveEntry> = index_archive
+    .entries()?
+    .map(|entry| {
+      let mut entry = entry?;
+      
+      let new_header = entry.header().clone();
 
-    let mut new_header = file.header().clone();
+      let mut content = Vec::new();
+      entry.read_to_end(&mut content)?;
 
-    if new_header.entry_type() == tar::EntryType::Regular {
-      let mut file_hash = Vec::new();
-      file.read_to_end(&mut file_hash)?;
+      let entry_path = entry.path()?.to_path_buf();
 
-      let entry_path = file.path()?;
-      // TODO handle error
-      let entry_path = entry_path.to_str().expect("entry path");
+      if new_header.entry_type() == tar::EntryType::Regular {
+        want_list.insert(entry_path.clone(), content.clone());
 
-      // Tell sender we want it
-      eprintln!("[receive-index] sending want {:?} {:?}", new_header.entry_type(), entry_path);
-      stdout.write_fmt(format_args!("{}\n", entry_path))?;
-    } else {
-      let entry_path = file.path().expect("entry path").into_owned();
-      output_builder.append_data(&mut new_header, entry_path, file)?;
-    }
-  }
+        Ok(ArchiveEntry::Lookup {
+          header: new_header,
+          path: entry_path,
+          digest: content,
+        })
+      } else {
+        Ok(ArchiveEntry::Concrete {
+          header: new_header,
+          path: entry_path,
+          bytes: content,
+        })
+      }
+    })
+    .collect::<io::Result<Vec<ArchiveEntry>>>()?;
 
+  // Start workers to scan the local library of parts
+
+  // Merge the found elements into the list of archive
+  // elements
+
+  // Ask the sender for the remaining lookup parts
+  archive_entries
+    .iter()
+    .map(|entry| {
+      match entry {
+        &ArchiveEntry::Lookup { ref header, ref path, ref digest } => {
+          // Tell sender we want it
+          eprintln!("[receive-index] sending want {:?} {:?}", header.entry_type(), path);
+          stdout.write_fmt(format_args!("{}\n", path.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "non UTF8 path"))?))
+        }
+        _ => Ok(())
+      }
+    })
+    .collect::<io::Result<Vec<_>>>()?;
   // Tell the sender EOF so they send the want parts
   stdout.flush()?;
   unsafe {
@@ -87,18 +116,58 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   // Read the tarball of wanted parts
   eprintln!("[receive-index] receiving wanted tarball");
   let want = tarball_codec::read("[receive-index]", &mut stdin)?;
-
-  // Append it to the archive we've built it
   let mut want_archive = tar::Archive::new(want.as_slice());
-  for file in want_archive.entries()? {
-    let mut file = file?;
+  let want_archive_entries_by_path = want_archive
+    .entries()?
+    .map(|entry| {
+      let mut entry = entry?;
 
-    eprintln!("[receive-index] receiving {:?}", file.path()?);
+      let entry_path = entry.path()?.to_path_buf();
 
-    let mut new_header = file.header().clone();
-    let entry_path = file.path()?.into_owned();
-    output_builder.append_data(&mut new_header, entry_path, file)?;
-  }
+      let mut bytes = Vec::new();
+      entry.read_to_end(&mut bytes)?;
+
+      Ok((entry_path.clone(), ArchiveEntry::Concrete {
+        header: entry.header().clone(),
+        path: entry_path,
+        bytes: bytes,
+      }))
+    })
+    .collect::<io::Result<Vec<_>>>()?
+    .into_iter()
+    .collect::<BTreeMap<PathBuf, ArchiveEntry>>();
+
+  // Merge the received elements into the list of archive
+  // elements
+  let archive_entries: Vec<&ArchiveEntry> = archive_entries
+    .iter()
+    .map(|element| {
+      match element {
+        ArchiveEntry::Lookup { header, path, digest } => {
+          want_archive_entries_by_path
+            .get(path)
+            .unwrap_or(element)
+        }
+        e => e
+      }
+    })
+    .collect();
+
+  // Translate the list of archive entries into an archive
+  let output_file = File::create(output_path)?;
+  let mut output_builder = tar::Builder::new(output_file);
+
+  archive_entries
+    .into_iter()
+    .map(|entry| {
+      match entry {
+        ArchiveEntry::Concrete { header, path, bytes } => {
+          output_builder.append_data(&mut header.clone(), path, bytes.as_slice())
+        }
+        _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry"))
+      }
+    })
+    .collect::<io::Result<Vec<()>>>()?;
 
   eprintln!("[receive-index] writing output tarball");
   let mut output = output_builder.into_inner()?;
