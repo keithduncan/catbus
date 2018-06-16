@@ -47,23 +47,19 @@ pub fn upload_index(tar_path: &str, index_path: &str) -> io::Result<()> {
   let tar_file = File::open(tar_path)?;
   let mut tar_archive = tar::Archive::new(tar_file);
 
-  let want_output = Vec::new();
-  let mut want_builder = tar::Builder::new(want_output);
+  let mut want_builder = tar::Builder::new(Vec::new());
 
   eprintln!("[upload-index] generating wanted tarball");
   for file in tar_archive.entries()? {
     let mut file = file?;
 
-    {
-      let file_path = file.path()?;
-      // TODO optimise out allocation
-      if !want_list.contains(&file_path.to_path_buf()) {
-        continue;
-      }
+    // TODO optimise out allocation?
+    let file_path = file.path()?.to_path_buf();
+    if !want_list.contains(&file_path) {
+      continue;
     }
 
     let mut new_header = file.header().clone();
-    let file_path = file.path()?.into_owned();
 
     want_builder.append_data(&mut new_header, file_path, file)?;
   }
