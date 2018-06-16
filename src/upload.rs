@@ -29,15 +29,19 @@ pub fn upload_index(tar_path: &str, index_path: &str) -> io::Result<()> {
   // Wait to read requested parts on stdin
   eprintln!("[upload-index] reading want lines");
   let stdin = BufReader::new(io::stdin());
+
   stdin
     .lines()
-    .for_each(|line| {
-      // TODO return error from upload_index
-      let line = line.expect("read line");
+    .map(|line| {
+      let line = line?;
+
       // For each wanted entry append it to the want list
       eprintln!("[upload-index] WANTED {:?}", line);
       want_list.insert(PathBuf::from(line));
-    });
+
+      Ok(())
+    })
+    .collect::<io::Result<Vec<()>>>()?;
 
   // Iterate the tar_path archive and accumulate the wanted entries
   let tar_file = File::open(tar_path)?;
