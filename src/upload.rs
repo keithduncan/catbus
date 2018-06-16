@@ -22,7 +22,7 @@ pub fn upload_index(tar_path: &str, index_path: &str) -> io::Result<()> {
   // Send the index first
   eprintln!("[upload-index] sending index tarball");
   let mut index_file = File::open(index_path)?;
-  tarball_codec::write_tarball("[upload-index]", &mut index_file, &mut stdout)?;
+  tarball_codec::write("[upload-index]", &mut index_file, &mut stdout)?;
 
   let mut want_list = BTreeSet::new();
 
@@ -67,7 +67,7 @@ pub fn upload_index(tar_path: &str, index_path: &str) -> io::Result<()> {
   let want_output = &want_builder.into_inner()?;
 
   eprintln!("[upload-index] sending wanted tarball");
-  tarball_codec::write_tarball("[upload-index]", &mut want_output.as_slice(), &mut stdout)?;
+  tarball_codec::write("[upload-index]", &mut want_output.as_slice(), &mut stdout)?;
   unsafe {
     libc::close(1);
   }

@@ -47,7 +47,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
 
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
-  let index = tarball_codec::read_tarball("[receive-index]", &mut stdin)?;
+  let index = tarball_codec::read("[receive-index]", &mut stdin)?;
 
   // The index is always compressed
   let decoder = gzip::Decoder::new(index.as_slice())?;
@@ -86,7 +86,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
 
   // Read the tarball of wanted parts
   eprintln!("[receive-index] receiving wanted tarball");
-  let want = tarball_codec::read_tarball("[receive-index]", &mut stdin)?;
+  let want = tarball_codec::read("[receive-index]", &mut stdin)?;
 
   // Append it to the archive we've built it
   let mut want_archive = tar::Archive::new(want.as_slice());

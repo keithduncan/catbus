@@ -1,6 +1,6 @@
 use std::{str, io::{self, Read, Write, BufRead, BufReader}};
 
-pub fn write_tarball<R: ?Sized, W: ?Sized>(name: &str, r: &mut R, w: &mut W) -> io::Result<()>
+pub fn write<R: ?Sized, W: ?Sized>(name: &str, r: &mut R, w: &mut W) -> io::Result<()>
   where R: Read, W: Write {
   let mut tarball = Vec::new();
   r.read_to_end(&mut tarball)?;
@@ -10,7 +10,7 @@ pub fn write_tarball<R: ?Sized, W: ?Sized>(name: &str, r: &mut R, w: &mut W) -> 
   w.flush()
 }
 
-pub fn read_tarball<T: Read>(name: &str, r: &mut BufReader<T>) -> io::Result<Vec<u8>> {
+pub fn read<T: Read>(name: &str, r: &mut BufReader<T>) -> io::Result<Vec<u8>> {
   let mut size_buffer = Vec::new();
   r.read_until(b'\0', &mut size_buffer)?;
   let ascii = &size_buffer[0..size_buffer.len()-1];
