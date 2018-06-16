@@ -240,12 +240,10 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
       }
     }
 
-    let mut file_content = Vec::new();
-    file.read_to_end(&mut file_content).expect("read entry content");
-
     let mut new_header = file.header().clone();
+    let file_path = file.path().expect("entry path").into_owned();
 
-    want_builder.append(&new_header, file).expect("append entry to wanted");
+    want_builder.append_data(&mut new_header, file_path, file).expect("append entry to wanted");
   }
 
   let want_output = &want_builder.into_inner().expect("finish wanted archive");
