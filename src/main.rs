@@ -206,14 +206,14 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   let mut stdout = io::stdout();
 
   // Send the index first
-  eprintln!("[upload-index] sending index");
+  eprintln!("[upload-index] sending index tarball");
   let mut index_file = File::open(index_path).expect("index file present");
   write_tarball("[upload-index]", &mut index_file, &mut stdout).expect("write index to receive-index");
 
   let mut want_list = BTreeSet::new();
 
   // Wait to read requested parts on stdin
-  eprintln!("[upload-index] reading WANT");
+  eprintln!("[upload-index] reading want lines");
   let stdin = BufReader::new(io::stdin());
   stdin.lines().for_each(|line| {
     let line = line.expect("read line");
@@ -229,7 +229,7 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
   let want_output = Vec::new();
   let mut want_builder = Builder::new(want_output);
 
-  eprintln!("[upload-index] generating wanted");
+  eprintln!("[upload-index] generating wanted tarball");
   for file in tar_archive.entries().expect("entries") {
     let mut file = file.expect("entry file");
 
@@ -248,7 +248,7 @@ fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
 
   let want_output = &want_builder.into_inner().expect("finish wanted archive");
 
-  eprintln!("[upload-index] sending wanted");
+  eprintln!("[upload-index] sending wanted tarball");
   write_tarball("[upload-index]", &mut want_output.as_slice(), &mut stdout).expect("write wanted to receive-index");
   unsafe {
     libc::close(1);
@@ -301,7 +301,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
       let entry_path = entry_path.to_str().expect("to str");
 
       // Tell sender we want it
-      eprintln!("[receive-index] WANT {:?} {:?} {:x?}", new_header.entry_type(), entry_path, file_hash);
+      eprintln!("[receive-index] sending want {:?} {:?} {:x?}", new_header.entry_type(), entry_path, file_hash);
       stdout.write_fmt(format_args!("{}\n", entry_path)).expect("write wanted entry");
     } else {
       let entry_path = file.path().expect("entry path").into_owned();
@@ -316,7 +316,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
   }
 
   // Read the tarball of wanted parts
-  eprintln!("[receive-index] receiving wanted");
+  eprintln!("[receive-index] receiving wanted tarball");
   let want = read_tarball("[receive-index]", &mut stdin).expect("read wanted from upload-index");
 
   // Append it to the archive we've built it
@@ -331,7 +331,7 @@ fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
     output_builder.append_data(&mut new_header, entry_path, file).expect("append wanted entry");
   }
 
-  eprintln!("[receive-index] writing output");
+  eprintln!("[receive-index] writing output tarball");
   let mut output = output_builder.into_inner().expect("write output");
   output.flush().expect("flush output");
 
