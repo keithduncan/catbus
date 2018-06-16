@@ -1,0 +1,13 @@
+#!/bin/bash
+
+set -euxo pipefail
+
+mode="${MODE:-debug}"
+
+release=
+if [ "$mode" = "release" ]
+then
+  release=--release
+fi
+
+cargo build $release
