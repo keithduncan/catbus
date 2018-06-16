@@ -4,32 +4,16 @@ extern crate clap;
 use clap::{Arg, App, AppSettings, SubCommand};
 
 extern crate tar;
-use tar::{Archive, Builder};
-
-extern crate libflate;
-use libflate::gzip;
 
 use std::{
-  path::PathBuf,
   fs::File,
-  str,
-  io::{
-    self,
-    Read,
-    Write,
-    BufRead,
-    BufReader
-  },
-  collections::BTreeSet,
+  io::{self, Write},
 };
-
-extern crate sha1;
-use sha1::{Sha1, Digest};
 
 extern crate digest;
 
 extern crate catbus;
-use catbus::tarball_codec;
+use catbus::{index, upload, receive};
 
 fn main() {
   let matches = App::new("catbus")
@@ -108,209 +92,45 @@ fn main() {
   } else if let Some(matches) = matches.subcommand_matches("transport") {
     transport(matches)
   } else {
-    Err(())
+    Err(io::Error::new(io::ErrorKind::Other, "unknown command"))
   };
 
   match result {
-    Err(()) => panic!("Unknown command"),
+    Err(e) => panic!("{:#?}", e),
     _ => {}
   }
 }
 
-type MatchResult = Result<(), ()>;
-
-fn index(matches: &clap::ArgMatches) -> MatchResult {
+fn index(matches: &clap::ArgMatches) -> io::Result<()> {
   if let Some(matches) = matches.subcommand_matches("create") {
     create_index(matches)
   } else {
-    Err(())
+    Err(io::Error::new(io::ErrorKind::Other, "unknown command"))
   }
 }
 
-fn generate_index(tar_path: &str) -> Vec<u8> {
-  let buffer = Vec::new();
-  let encoder = gzip::Encoder::new(buffer).expect("encoder");
-  let mut builder = Builder::new(encoder);
-
-  let file = File::open(tar_path).expect("open archive");
-  let mut archive = Archive::new(file);
-
-  for file in archive.entries().expect("entries") {
-    // Make sure there wasn't an I/O error
-    let mut file = file.expect("entry file");
-
-    let file_path = file.path().expect("entry path").into_owned();
-    let mut new_header = file.header().clone();
-
-    if file.header().entry_type() == tar::EntryType::Regular {
-      let file_hash = Sha1::digest_reader(&mut file).expect("file digest");
-
-      new_header.set_size(file_hash.len() as u64);
-      new_header.set_cksum();
-
-      builder.append_data(&mut new_header, file_path, file_hash.as_ref()).expect("append file digest entry");
-    } else {
-      builder.append_data(&mut new_header, file_path, file).expect("append entry");
-    }
-  }
-
-  builder.into_inner().expect("finish archive").finish().into_result().expect("finish compress")
-}
-
-fn create_index(matches: &clap::ArgMatches) -> MatchResult {
+fn create_index(matches: &clap::ArgMatches) -> io::Result<()> {
   let tar_path = matches.value_of("file").expect("file arg required");
   let index_path = matches.value_of("output").expect("output arg required");
 
-  let mut index_file = File::create(index_path).expect("create index file");
-  index_file.write_all(&generate_index(tar_path)).expect("write index file");
+  let mut index_file = File::create(index_path)?;
+  index_file.write_all(&index::create(tar_path)?)?;
 
   Ok(())
 }
 
-fn transport(matches: &clap::ArgMatches) -> MatchResult {
+fn transport(matches: &clap::ArgMatches) -> io::Result<()> {
   if let Some(matches) = matches.subcommand_matches("upload-index") {
-    upload_index(matches)
+    let tar_path = matches.value_of("file").expect("file arg required");
+    let index_path = matches.value_of("index").expect("index arg required");
+
+    upload::upload_index(tar_path, index_path)
   } else if let Some(matches) = matches.subcommand_matches("receive-index") {
-    receive_index(matches)
+    let destination_path = matches.value_of("destination").expect("destination arg required");
+    let destination_file = matches.value_of("file").expect("file arg required");
+
+    receive::receive_index(destination_path.as_ref(), destination_file)
   } else {
-    Err(())
+    Err(io::Error::new(io::ErrorKind::Other, "unknown command"))
   }
-}
-
-fn upload_index(matches: &clap::ArgMatches) -> MatchResult {
-  let tar_path = matches.value_of("file").expect("file arg required");
-  let index_path = matches.value_of("index").expect("index arg required");
-
-  // Output on stdout
-  let mut stdout = io::stdout();
-
-  // Send the index first
-  eprintln!("[upload-index] sending index tarball");
-  let mut index_file = File::open(index_path).expect("index file present");
-  tarball_codec::write_tarball("[upload-index]", &mut index_file, &mut stdout).expect("write index to receive-index");
-
-  let mut want_list = BTreeSet::new();
-
-  // Wait to read requested parts on stdin
-  eprintln!("[upload-index] reading want lines");
-  let stdin = BufReader::new(io::stdin());
-  stdin.lines().for_each(|line| {
-    let line = line.expect("read line");
-    // For each wanted entry append it to the want list
-    eprintln!("[upload-index] WANTED {:?}", line);
-    want_list.insert(PathBuf::from(line));
-  });
-
-  // Iterate the tar_path archive and accumulate the wanted entries
-  let tar_file = File::open(tar_path).expect("tar file present");
-  let mut tar_archive = Archive::new(tar_file);
-
-  let want_output = Vec::new();
-  let mut want_builder = Builder::new(want_output);
-
-  eprintln!("[upload-index] generating wanted tarball");
-  for file in tar_archive.entries().expect("entries") {
-    let mut file = file.expect("entry file");
-
-    {
-      let file_path = file.path().expect("entry path");
-      if !want_list.contains(&file_path.to_path_buf()) {
-        continue;
-      }
-    }
-
-    let mut new_header = file.header().clone();
-    let file_path = file.path().expect("entry path").into_owned();
-
-    want_builder.append_data(&mut new_header, file_path, file).expect("append entry to wanted");
-  }
-
-  let want_output = &want_builder.into_inner().expect("finish wanted archive");
-
-  eprintln!("[upload-index] sending wanted tarball");
-  tarball_codec::write_tarball("[upload-index]", &mut want_output.as_slice(), &mut stdout).expect("write wanted to receive-index");
-  unsafe {
-    libc::close(1);
-  }
-
-  Ok(())
-}
-
-fn receive_index(matches: &clap::ArgMatches) -> MatchResult {
-  let destination_path = PathBuf::from(matches.value_of("destination").expect("destination arg required"));
-  let destination_file = matches.value_of("file").expect("file arg required");
-
-  let mut stdin = BufReader::new(io::stdin());
-  let mut stdout = io::stdout();
-
-  // Destination we're going to write a full tarball to
-  let mut index_path = destination_path.clone();
-  index_path.push(format!("{}.idx", destination_file));
-
-  let mut output_path = destination_path.clone();
-  output_path.push(destination_file);
-
-  // Read the index
-  eprintln!("[receive-index] receiving index tarball");
-  let index = tarball_codec::read_tarball("[receive-index]", &mut stdin).expect("read index from upload-index");
-
-  // The index is always compressed
-  let decoder = gzip::Decoder::new(index.as_slice()).expect("gzip decoder");
-  let mut index_archive = Archive::new(decoder);
-
-  let output_file = File::create(output_path).expect("create output file");
-  let mut output_builder = Builder::new(output_file);
-
-  for file in index_archive.entries().expect("entries") {
-    let mut file = file.expect("entry file");
-
-    let mut new_header = file.header().clone();
-
-    if new_header.entry_type() == tar::EntryType::Regular {
-      let mut file_hash = Vec::new();
-      file.read_to_end(&mut file_hash).expect("read entry content");
-
-      let entry_path = file.path().expect("entry path");
-      let entry_path = entry_path.to_str().expect("to str");
-
-      // Tell sender we want it
-      eprintln!("[receive-index] sending want {:?} {:?}", new_header.entry_type(), entry_path);
-      stdout.write_fmt(format_args!("{}\n", entry_path)).expect("write wanted entry");
-    } else {
-      let entry_path = file.path().expect("entry path").into_owned();
-      output_builder.append_data(&mut new_header, entry_path, file).expect("append entry to output");
-    }
-  }
-
-  // Tell the sender EOF so they send the want parts
-  stdout.flush().expect("flush wanted entries");
-  unsafe {
-    libc::close(1);
-  }
-
-  // Read the tarball of wanted parts
-  eprintln!("[receive-index] receiving wanted tarball");
-  let want = tarball_codec::read_tarball("[receive-index]", &mut stdin).expect("read wanted from upload-index");
-
-  // Append it to the archive we've built it
-  let mut want_archive = Archive::new(want.as_slice());
-  for file in want_archive.entries().expect("entries") {
-    let mut file = file.expect("wanted entry");
-
-    eprintln!("[receive-index] receiving {:?}", file.path().expect("entry path"));
-
-    let mut new_header = file.header().clone();
-    let entry_path = file.path().expect("entry path").into_owned();
-    output_builder.append_data(&mut new_header, entry_path, file).expect("append wanted entry");
-  }
-
-  eprintln!("[receive-index] writing output tarball");
-  let mut output = output_builder.into_inner().expect("write output");
-  output.flush().expect("flush output");
-
-  let mut index_file = File::create(index_path).expect("create index file");
-  eprintln!("[receive-index] writing index tarball");
-  index_file.write_all(&index).expect("write index to destination");
-
-  Ok(())
 }
