@@ -21,6 +21,19 @@ use self::libflate::gzip;
 
 extern crate libc;
 
+enum ArchiveEntry<'a> {
+  Concrete {
+    header: &'a tar::Header,
+    path: &'a Path,
+    bytes: &'a [u8],
+  },
+  Lookup {
+    header: &'a tar::Header,
+    path: &'a Path,
+    digest: &'a [u8]
+  },
+}
+
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
   let mut stdin = BufReader::new(io::stdin());
   let mut stdout = io::stdout();
