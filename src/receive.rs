@@ -63,25 +63,24 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
     .map(|entry| {
       let mut entry = entry?;
       
-      let new_header = entry.header().clone();
+      let path = entry.path()?.to_path_buf();
+      let header = entry.header().clone();
 
       let mut content = Vec::new();
       entry.read_to_end(&mut content)?;
 
-      let entry_path = entry.path()?.to_path_buf();
-
-      if new_header.entry_type() == tar::EntryType::Regular {
-        want_list.insert(entry_path.clone(), content.clone());
+      if header.entry_type().is_file() {
+        want_list.insert(path.clone(), content.clone());
 
         Ok(ArchiveEntry::Lookup {
-          header: new_header,
-          path: entry_path,
+          header: header,
+          path: path,
           digest: content,
         })
       } else {
         Ok(ArchiveEntry::Concrete {
-          header: new_header,
-          path: entry_path,
+          header: header,
+          path: path,
           bytes: content,
         })
       }
@@ -122,15 +121,16 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
     .map(|entry| {
       let mut entry = entry?;
 
-      let entry_path = entry.path()?.to_path_buf();
+      let path = entry.path()?.to_path_buf();
+      let header = entry.header().clone();
 
-      let mut bytes = Vec::new();
-      entry.read_to_end(&mut bytes)?;
+      let mut content = Vec::new();
+      entry.read_to_end(&mut content)?;
 
-      Ok((entry_path.clone(), ArchiveEntry::Concrete {
-        header: entry.header().clone(),
-        path: entry_path,
-        bytes: bytes,
+      Ok((path.clone(), ArchiveEntry::Concrete {
+        header: header,
+        path: path,
+        bytes: content,
       }))
     })
     .collect::<io::Result<Vec<_>>>()?
@@ -162,6 +162,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
     .map(|entry| {
       match entry {
         ArchiveEntry::Concrete { header, path, bytes } => {
+          // TODO remove allocation
           output_builder.append_data(&mut header.clone(), path, bytes.as_slice())
         }
         _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry"))
