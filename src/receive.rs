@@ -188,9 +188,8 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
     .into_iter()
     .map(|entry| {
       match entry {
-        ArchiveEntry::Concrete { header, path, bytes } => {
-          // TODO remove allocation
-          output_builder.append_data(&mut header.clone(), path, bytes.as_slice())
+        ArchiveEntry::Concrete { mut header, path, bytes } => {
+          output_builder.append_data(&mut header, path, bytes.as_slice())
         }
         _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry"))
       }
