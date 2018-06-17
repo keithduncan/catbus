@@ -66,9 +66,33 @@ fn discover_indexes(dir: &Path) -> Vec<(PathBuf, PathBuf)> {
   Vec::new()
 }
 
+fn request_remaining_entries(archive_entries: &[ArchiveEntry]) -> io::Result<()> {
+  let mut stdout = BufWriter::new(io::stdout());
+
+  archive_entries
+    .iter()
+    .map(|entry| {
+      match entry {
+        &ArchiveEntry::Lookup { ref header, ref path, ref digest } => {
+          // Tell sender we want it
+          eprintln!("[receive-index] sending want {:?} {:?}", header.entry_type(), path);
+          stdout.write_fmt(format_args!("{}\n", path.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "non UTF8 path"))?))
+        }
+        _ => Ok(())
+      }
+    })
+    .collect::<io::Result<Vec<_>>>()?;
+  // Tell the sender EOF so they send the want parts
+  stdout.flush()?;
+  unsafe {
+    libc::close(1);
+  }
+
+  Ok(())
+}
+
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
   let mut stdin = BufReader::new(io::stdin());
-  let mut stdout = BufWriter::new(io::stdout());
 
   // Destination we're going to write a full tarball to
   let mut index_path = PathBuf::from(destination_path);
@@ -131,27 +155,9 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   let archive_entries = merge_entries(archive_entries, discovered_entries);
 
   // Ask the sender for the remaining lookup parts
-  archive_entries
-    .iter()
-    .map(|entry| {
-      match entry {
-        &ArchiveEntry::Lookup { ref header, ref path, ref digest } => {
-          // Tell sender we want it
-          eprintln!("[receive-index] sending want {:?} {:?}", header.entry_type(), path);
-          stdout.write_fmt(format_args!("{}\n", path.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "non UTF8 path"))?))
-        }
-        _ => Ok(())
-      }
-    })
-    .collect::<io::Result<Vec<_>>>()?;
-  // Tell the sender EOF so they send the want parts
-  stdout.flush()?;
-  unsafe {
-    libc::close(1);
-  }
-
-  // Read the tarball of wanted parts
+  request_remaining_entries(&archive_entries)?;
   eprintln!("[receive-index] receiving wanted tarball");
+  // Read the tarball of wanted parts
   let want = tarball_codec::read("[receive-index]", &mut stdin)?;
   let mut want_archive = tar::Archive::new(want.as_slice());
 
