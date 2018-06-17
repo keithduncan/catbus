@@ -45,7 +45,7 @@ enum ArchiveEntry {
 
 fn find_entries(wanted: &BTreeMap<PathBuf, Vec<u8>>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ArchiveEntry)>> {
   let index = File::open(candidate_index)?;
-  let (index_entries, want_list) = archive_entries_for_index(&index)?;
+  let (_, want_list) = archive_entries_for_index(&index)?;
 
   Ok(Vec::new())
 }
@@ -211,7 +211,7 @@ fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeMap<
   merge_entries(archive_entries, discovered_entries)
 }
 
-fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeMap<PathBuf, Vec<u8>>, input: &mut BufReader<T>) -> io::Result<Vec<ArchiveEntry>> {
+fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, input: &mut BufReader<T>) -> io::Result<Vec<ArchiveEntry>> {
   request_remaining_entries(&archive_entries)?;
   eprintln!("[receive-index] receiving wanted tarball");
   // Read the tarball of wanted parts
@@ -253,7 +253,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   let archive_entries = merge_local_entries(archive_entries, &want_list, destination_path);
 
   // Ask the sender for the remaining lookup parts
-  let archive_entries = merge_remote_entries(archive_entries, &want_list, &mut input)?;
+  let archive_entries = merge_remote_entries(archive_entries, &mut input)?;
 
   // Translate the list of archive entries into an archive
   let mut output_path = PathBuf::from(destination_path);
