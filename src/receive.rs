@@ -26,6 +26,7 @@ extern crate libc;
 extern crate rayon;
 use self::rayon::prelude::*;
 
+#[derive(Clone)]
 enum ArchiveEntry {
   Concrete {
     header: tar::Header,
@@ -45,6 +46,19 @@ fn find_entries(wanted: &BTreeMap<PathBuf, Vec<u8>>, candidate: &Path, candidate
 
 fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ArchiveEntry>) -> Vec<ArchiveEntry> {
   entries
+    .into_iter()
+    .map(|element| {
+      match element {
+        ArchiveEntry::Lookup { header, path, digest } => {
+          lookup
+            .get(&path)
+            .cloned()
+            .unwrap_or(ArchiveEntry::Lookup { header, path, digest })
+        }
+        e => e
+      }
+    })
+    .collect()
 }
 
 // Search a directory for pairs of indexes and tarballs
@@ -164,19 +178,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
 
   // Merge the received elements into the list of archive
   // elements
-  let archive_entries: Vec<&ArchiveEntry> = archive_entries
-    .iter()
-    .map(|element| {
-      match element {
-        ArchiveEntry::Lookup { header, path, digest } => {
-          want_archive_entries_by_path
-            .get(path)
-            .unwrap_or(element)
-        }
-        e => e
-      }
-    })
-    .collect();
+  let archive_entries = merge_entries(archive_entries, want_archive_entries_by_path);
 
   // Translate the list of archive entries into an archive
   let output_file = File::create(output_path)?;
