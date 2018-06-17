@@ -115,13 +115,6 @@ fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ArchiveEntry>, wri
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
   let mut stdin = BufReader::new(io::stdin());
 
-  // Destination we're going to write a full tarball to
-  let mut index_path = PathBuf::from(destination_path);
-  index_path.push(format!("{}.idx", destination_file));
-
-  let mut output_path = PathBuf::from(destination_path);
-  output_path.push(destination_file);
-
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
   let index = tarball_codec::read("[receive-index]", &mut stdin)?;
@@ -208,9 +201,13 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   let archive_entries = merge_entries(archive_entries, want_archive_entries_by_path);
 
   // Translate the list of archive entries into an archive
+  let mut output_path = PathBuf::from(destination_path);
+  output_path.push(destination_file);
   let output_file = File::create(output_path)?;
   serialise_entries_to_writer(archive_entries, output_file)?;
 
+  let mut index_path = PathBuf::from(destination_path);
+  index_path.push(format!("{}.idx", destination_file));
   let mut index_file = File::create(index_path)?;
   eprintln!("[receive-index] writing index tarball");
   index_file.write_all(&index)?;
