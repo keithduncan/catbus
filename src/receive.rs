@@ -14,7 +14,10 @@ use std::{
     self,
     File,
   },
-  collections::BTreeMap,
+  collections::{
+    BTreeSet,
+    BTreeMap,
+  },
 };
 
 use tarball_codec;
@@ -43,7 +46,7 @@ enum ArchiveEntry {
   },
 }
 
-fn find_entries(wanted: &BTreeMap<PathBuf, Vec<u8>>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ArchiveEntry)>> {
+fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ArchiveEntry)>> {
   let index = File::open(candidate_index)?;
   let (_, want_list) = archive_entries_for_index(&index)?;
 
@@ -144,8 +147,8 @@ fn finalise_output(archive_entries: Vec<ArchiveEntry>, output_path: &Path, index
   index_file.write_all(index)
 }
 
-fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>, BTreeMap<PathBuf, Vec<u8>>)> {
-  let mut want_list = BTreeMap::new();
+fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>, BTreeSet<(PathBuf, Vec<u8>)>)> {
+  let mut want_list = BTreeSet::new();
 
   // An index is always compressed
   let decoder = gzip::Decoder::new(read)?;
@@ -163,7 +166,7 @@ fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>,
       entry.read_to_end(&mut content)?;
 
       if header.entry_type().is_file() {
-        want_list.insert(path.clone(), content.clone());
+        want_list.insert((path.clone(), content.clone()));
 
         Ok(ArchiveEntry::Lookup {
           header: header,
@@ -183,7 +186,7 @@ fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>,
   Ok((archive_entries, want_list))
 }
 
-fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry>, BTreeMap<PathBuf, Vec<u8>>)> {
+fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry>, BTreeSet<(PathBuf, Vec<u8>)>)> {
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
   let index = tarball_codec::read("[receive-index]", read)?;
@@ -193,7 +196,7 @@ fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, V
   Ok((index, archive_entries, want_list))
 }
 
-fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeMap<PathBuf, Vec<u8>>, destination_path: &Path) -> Vec<ArchiveEntry> {
+fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<(PathBuf, Vec<u8>)>, destination_path: &Path) -> Vec<ArchiveEntry> {
   // Find adjacent indexes
   let indexes = discover_indexes(destination_path);
   eprintln!("[receive-index] discover_indexes {:#?}", indexes);
