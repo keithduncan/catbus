@@ -91,6 +91,27 @@ fn request_remaining_entries(archive_entries: &[ArchiveEntry]) -> io::Result<()>
   Ok(())
 }
 
+fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ArchiveEntry>, write: T) -> io::Result<()> {
+  let mut output_builder = tar::Builder::new(write);
+
+  archive_entries
+    .into_iter()
+    .map(|entry| {
+      match entry {
+        ArchiveEntry::Concrete { mut header, path, bytes } => {
+          output_builder.append_data(&mut header, path, bytes.as_slice())
+        }
+        _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry"))
+      }
+    })
+    .collect::<io::Result<Vec<()>>>()?;
+
+  eprintln!("[receive-index] writing output tarball");
+
+  let mut output = output_builder.into_inner()?;
+  output.flush()
+}
+
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
   let mut stdin = BufReader::new(io::stdin());
 
@@ -188,23 +209,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
 
   // Translate the list of archive entries into an archive
   let output_file = File::create(output_path)?;
-  let mut output_builder = tar::Builder::new(output_file);
-
-  archive_entries
-    .into_iter()
-    .map(|entry| {
-      match entry {
-        ArchiveEntry::Concrete { mut header, path, bytes } => {
-          output_builder.append_data(&mut header, path, bytes.as_slice())
-        }
-        _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry"))
-      }
-    })
-    .collect::<io::Result<Vec<()>>>()?;
-
-  eprintln!("[receive-index] writing output tarball");
-  let mut output = output_builder.into_inner()?;
-  output.flush()?;
+  serialise_entries_to_writer(archive_entries, output_file)?;
 
   let mut index_file = File::create(index_path)?;
   eprintln!("[receive-index] writing index tarball");
