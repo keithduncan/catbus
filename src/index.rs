@@ -26,7 +26,7 @@ pub fn create(tar_path: &str) -> io::Result<Vec<u8>> {
     let file_path = file.path()?.into_owned();
     let mut new_header = file.header().clone();
 
-    if file.header().entry_type() == tar::EntryType::Regular {
+    if file.header().entry_type().is_file() {
       let file_hash = Sha1::digest_reader(&mut file)?;
 
       new_header.set_size(file_hash.len() as u64);
