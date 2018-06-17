@@ -10,7 +10,10 @@ use std::{
     Read,
     Write,
   },
-  fs::File,
+  fs::{
+    self,
+    File,
+  },
   collections::BTreeMap,
 };
 
@@ -63,7 +66,25 @@ fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ArchiveEn
 
 // Search a directory for pairs of indexes and tarballs
 fn discover_indexes(dir: &Path) -> Vec<(PathBuf, PathBuf)> {
-  Vec::new()
+  fs::read_dir(dir)
+    .map(|entries| {
+      entries
+        .filter_map(|entry| {
+          entry.ok()
+        })
+        .filter_map(|entry| {
+          let path = entry.path();
+
+          if path.extension()?.to_str()? == "idx" {
+            let tarball_path = path.with_extension("");
+            Some((path, tarball_path))
+          } else {
+            None
+          }
+        })
+        .collect()
+    })
+    .unwrap_or(Vec::new())
 }
 
 fn request_remaining_entries(archive_entries: &[ArchiveEntry]) -> io::Result<()> {
@@ -169,6 +190,7 @@ fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, V
 fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeMap<PathBuf, Vec<u8>>, destination_path: &Path) -> Vec<ArchiveEntry> {
   // Find adjacent indexes
   let indexes = discover_indexes(destination_path);
+  eprintln!("[receive-index] discover_indexes {:#?}", indexes);
 
   // Find the wanted entries in the adjacent indexes
   let discovered_entries: BTreeMap<PathBuf, ArchiveEntry> = indexes
