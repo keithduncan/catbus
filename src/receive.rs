@@ -36,6 +36,14 @@ enum ArchiveEntry {
   },
 }
 
+fn find_entries(wanted: &BTreeMap<PathBuf, Vec<u8>>, candidate: &Path, candidate_index: &Path) -> BTreeMap<PathBuf, ArchiveEntry> {
+  BTreeMap::new()
+}
+
+fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ArchiveEntry>) -> Vec<ArchiveEntry> {
+  entries
+}
+
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
   let mut stdin = BufReader::new(io::stdin());
   let mut stdout = BufWriter::new(io::stdout());
