@@ -120,48 +120,56 @@ fn finalise_output(archive_entries: Vec<ArchiveEntry>, output_path: &Path, index
   index_file.write_all(index)
 }
 
-pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
-  let mut stdin = BufReader::new(io::stdin());
-
+fn read_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry>, BTreeMap<PathBuf, Vec<u8>>)> {
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
-  let index = tarball_codec::read("[receive-index]", &mut stdin)?;
-
-  // The index is always compressed
-  let decoder = gzip::Decoder::new(index.as_slice())?;
-  let mut index_archive = tar::Archive::new(decoder);
+  let index = tarball_codec::read("[receive-index]", read)?;
 
   // Collect the list of lookup
   let mut want_list = BTreeMap::new();
 
-  let archive_entries: Vec<ArchiveEntry> = index_archive
-    .entries()?
-    .map(|entry| {
-      let mut entry = entry?;
-      
-      let path = entry.path()?.to_path_buf();
-      let header = entry.header().clone();
+  let archive_entries: Vec<ArchiveEntry> = {
+    // The index is always compressed
+    let decoder = gzip::Decoder::new(index.as_slice())?;
+    let mut index_archive = tar::Archive::new(decoder);
 
-      let mut content = Vec::new();
-      entry.read_to_end(&mut content)?;
+    index_archive
+      .entries()?
+      .map(|entry| {
+        let mut entry = entry?;
 
-      if header.entry_type().is_file() {
-        want_list.insert(path.clone(), content.clone());
+        let path = entry.path()?.to_path_buf();
+        let header = entry.header().clone();
 
-        Ok(ArchiveEntry::Lookup {
-          header: header,
-          path: path,
-          digest: content,
-        })
-      } else {
-        Ok(ArchiveEntry::Concrete {
-          header: header,
-          path: path,
-          bytes: content,
-        })
-      }
-    })
-    .collect::<io::Result<Vec<ArchiveEntry>>>()?;
+        let mut content = Vec::new();
+        entry.read_to_end(&mut content)?;
+
+        if header.entry_type().is_file() {
+          want_list.insert(path.clone(), content.clone());
+
+          Ok(ArchiveEntry::Lookup {
+            header: header,
+            path: path,
+            digest: content,
+          })
+        } else {
+          Ok(ArchiveEntry::Concrete {
+            header: header,
+            path: path,
+            bytes: content,
+          })
+        }
+      })
+      .collect::<io::Result<Vec<ArchiveEntry>>>()?
+  };
+
+  Ok((index, archive_entries, want_list))
+}
+
+pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
+  let mut input = BufReader::new(io::stdin());
+
+  let (index, archive_entries, want_list) = read_index(&mut input)?;
 
   // Start workers to scan the local library of parts
   let indexes = discover_indexes(destination_path);
@@ -180,7 +188,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   request_remaining_entries(&archive_entries)?;
   eprintln!("[receive-index] receiving wanted tarball");
   // Read the tarball of wanted parts
-  let want = tarball_codec::read("[receive-index]", &mut stdin)?;
+  let want = tarball_codec::read("[receive-index]", &mut input)?;
   let mut want_archive = tar::Archive::new(want.as_slice());
 
   let want_archive_entries_by_path = want_archive
