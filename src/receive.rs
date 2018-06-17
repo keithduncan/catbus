@@ -183,19 +183,11 @@ fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeMap<
   merge_entries(archive_entries, discovered_entries)
 }
 
-pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
-  let mut input = BufReader::new(io::stdin());
-
-  let (index, archive_entries, want_list) = read_index(&mut input)?;
-
-  // Start workers to scan the local library of parts
-  let archive_entries = merge_local_entries(archive_entries, &want_list, destination_path);
-
-  // Ask the sender for the remaining lookup parts
+fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeMap<PathBuf, Vec<u8>>, input: &mut BufReader<T>) -> io::Result<Vec<ArchiveEntry>> {
   request_remaining_entries(&archive_entries)?;
   eprintln!("[receive-index] receiving wanted tarball");
   // Read the tarball of wanted parts
-  let want = tarball_codec::read("[receive-index]", &mut input)?;
+  let want = tarball_codec::read("[receive-index]", input)?;
   let mut want_archive = tar::Archive::new(want.as_slice());
 
   let want_archive_entries_by_path = want_archive
@@ -221,7 +213,19 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
 
   // Merge the received elements into the list of archive
   // elements
-  let archive_entries = merge_entries(archive_entries, want_archive_entries_by_path);
+  Ok(merge_entries(archive_entries, want_archive_entries_by_path))
+}
+
+pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
+  let mut input = BufReader::new(io::stdin());
+
+  let (index, archive_entries, want_list) = read_index(&mut input)?;
+
+  // Start workers to scan the local library of parts
+  let archive_entries = merge_local_entries(archive_entries, &want_list, destination_path);
+
+  // Ask the sender for the remaining lookup parts
+  let archive_entries = merge_remote_entries(archive_entries, &want_list, &mut input)?;
 
   // Translate the list of archive entries into an archive
   let mut output_path = PathBuf::from(destination_path);
