@@ -10,3 +10,4 @@ libflate = "0.1"
 sha-1 = "0.7.0"
 digest = { version = "0.7", features = ["std"] }
 libc = "0.2.42"
+rayon = "1.0.1"

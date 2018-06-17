@@ -23,6 +23,9 @@ use self::libflate::gzip;
 
 extern crate libc;
 
+extern crate rayon;
+use self::rayon::prelude::*;
+
 enum ArchiveEntry {
   Concrete {
     header: tar::Header,
@@ -36,12 +39,17 @@ enum ArchiveEntry {
   },
 }
 
-fn find_entries(wanted: &BTreeMap<PathBuf, Vec<u8>>, candidate: &Path, candidate_index: &Path) -> BTreeMap<PathBuf, ArchiveEntry> {
-  BTreeMap::new()
+fn find_entries(wanted: &BTreeMap<PathBuf, Vec<u8>>, candidate: &Path, candidate_index: &Path) -> Vec<(PathBuf, ArchiveEntry)> {
+  Vec::new()
 }
 
 fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ArchiveEntry>) -> Vec<ArchiveEntry> {
   entries
+}
+
+// Search a directory for pairs of indexes and tarballs
+fn discover_indexes(dir: &Path) -> Vec<(PathBuf, PathBuf)> {
+  Vec::new()
 }
 
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
@@ -96,9 +104,17 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
     .collect::<io::Result<Vec<ArchiveEntry>>>()?;
 
   // Start workers to scan the local library of parts
+  let indexes = discover_indexes(destination_path);
+  let discovered_entries: BTreeMap<PathBuf, ArchiveEntry> = indexes
+    .par_iter()
+    .flat_map(|(index_path, tarball_path)| {
+      find_entries(&want_list, index_path, tarball_path)
+    })
+    .collect();
 
   // Merge the found elements into the list of archive
   // elements
+  let archive_entries = merge_entries(archive_entries, discovered_entries);
 
   // Ask the sender for the remaining lookup parts
   archive_entries
@@ -124,6 +140,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   eprintln!("[receive-index] receiving wanted tarball");
   let want = tarball_codec::read("[receive-index]", &mut stdin)?;
   let mut want_archive = tar::Archive::new(want.as_slice());
+
   let want_archive_entries_by_path = want_archive
     .entries()?
     .map(|entry| {
