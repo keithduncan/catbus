@@ -106,10 +106,18 @@ fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ArchiveEntry>, wri
     })
     .collect::<io::Result<Vec<()>>>()?;
 
-  eprintln!("[receive-index] writing output tarball");
-
   let mut output = output_builder.into_inner()?;
   output.flush()
+}
+
+fn finalise_output(archive_entries: Vec<ArchiveEntry>, output_path: &Path, index: &[u8], index_path: &Path) -> io::Result<()> {
+  let output_file = File::create(output_path)?;
+  eprintln!("[receive-index] writing output tarball");
+  serialise_entries_to_writer(archive_entries, output_file)?;
+
+  let mut index_file = File::create(index_path)?;
+  eprintln!("[receive-index] writing index tarball");
+  index_file.write_all(index)
 }
 
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
@@ -203,12 +211,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   // Translate the list of archive entries into an archive
   let mut output_path = PathBuf::from(destination_path);
   output_path.push(destination_file);
-  let output_file = File::create(output_path)?;
-  serialise_entries_to_writer(archive_entries, output_file)?;
-
   let mut index_path = PathBuf::from(destination_path);
   index_path.push(format!("{}.idx", destination_file));
-  let mut index_file = File::create(index_path)?;
-  eprintln!("[receive-index] writing index tarball");
-  index_file.write_all(&index)
+  finalise_output(archive_entries, &output_path, &index, &index_path)
 }
