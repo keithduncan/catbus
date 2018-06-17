@@ -34,11 +34,7 @@ use self::rayon::prelude::*;
 
 #[derive(Clone)]
 enum ArchiveEntry {
-  Concrete {
-    header: tar::Header,
-    path: PathBuf,
-    bytes: Vec<u8>,
-  },
+  Concrete(ConcreteEntry),
   Lookup {
     header: tar::Header,
     path: PathBuf,
@@ -46,7 +42,14 @@ enum ArchiveEntry {
   },
 }
 
-fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ArchiveEntry)>> {
+#[derive(Clone)]
+struct ConcreteEntry {
+  header: tar::Header,
+  path: PathBuf,
+  bytes: Vec<u8>,
+}
+
+fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ConcreteEntry)>> {
   let index = File::open(candidate_index)?;
   let (_, want_list) = archive_entries_for_index(&index)?;
 
@@ -76,7 +79,7 @@ fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candida
         let mut content = Vec::new();
         entry.read_to_end(&mut content).ok()?;
 
-        Some((path.clone(), ArchiveEntry::Concrete {
+        Some((path.clone(), ConcreteEntry {
           header: entry.header().clone(),
           path: path,
           bytes: content,
@@ -90,18 +93,17 @@ fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candida
   Ok(archive_entries)
 }
 
-fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ArchiveEntry>) -> Vec<ArchiveEntry> {
+fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ConcreteEntry>) -> Vec<ArchiveEntry> {
   entries
     .into_iter()
     .map(|element| {
       match element {
-        ArchiveEntry::Lookup { header, path, digest } => {
-          lookup
-            .get(&path)
-            .cloned()
-            .unwrap_or(ArchiveEntry::Lookup { header, path, digest })
-        }
-        e => e
+        ArchiveEntry::Lookup { header, path, digest } => lookup
+          .get(&path)
+          .cloned()
+          .map(|concrete| ArchiveEntry::Concrete(concrete))
+          .unwrap_or(ArchiveEntry::Lookup { header, path, digest }),
+        e => e,
       }
     })
     .collect()
@@ -155,18 +157,13 @@ fn request_remaining_entries(archive_entries: &[ArchiveEntry]) -> io::Result<()>
   Ok(())
 }
 
-fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ArchiveEntry>, write: T) -> io::Result<()> {
+fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ConcreteEntry>, write: T) -> io::Result<()> {
   let mut output_builder = tar::Builder::new(write);
 
   archive_entries
     .into_iter()
-    .map(|entry| {
-      match entry {
-        ArchiveEntry::Concrete { mut header, path, bytes } => {
-          output_builder.append_data(&mut header, path, bytes.as_slice())
-        }
-        _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry"))
-      }
+    .map(|mut entry| {
+      output_builder.append_data(&mut entry.header, entry.path, entry.bytes.as_slice())
     })
     .collect::<io::Result<Vec<()>>>()?;
 
@@ -174,7 +171,7 @@ fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ArchiveEntry>, wri
   output.flush()
 }
 
-fn finalise_output(archive_entries: Vec<ArchiveEntry>, output_path: &Path, index: &[u8], index_path: &Path) -> io::Result<()> {
+fn finalise_output(archive_entries: Vec<ConcreteEntry>, output_path: &Path, index: &[u8], index_path: &Path) -> io::Result<()> {
   let output_file = File::create(output_path)?;
   eprintln!("[receive-index] writing output tarball");
   serialise_entries_to_writer(archive_entries, output_file)?;
@@ -211,11 +208,11 @@ fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>,
           digest: content,
         })
       } else {
-        Ok(ArchiveEntry::Concrete {
+        Ok(ArchiveEntry::Concrete(ConcreteEntry {
           header: header,
           path: path,
           bytes: content,
-        })
+        }))
       }
     })
     .collect::<io::Result<Vec<ArchiveEntry>>>()?;
@@ -239,7 +236,7 @@ fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<
   eprintln!("[receive-index] discover_indexes {:#?}", indexes);
 
   // Find the wanted entries in the adjacent indexes
-  let discovered_entries: BTreeMap<PathBuf, ArchiveEntry> = indexes
+  let discovered_entries: BTreeMap<PathBuf, ConcreteEntry> = indexes
     .par_iter()
     .flat_map(|(index_path, tarball_path)| {
       find_entries(&want_list, index_path, tarball_path).unwrap_or(Vec::new())
@@ -269,7 +266,7 @@ fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, input: &mut
       let mut content = Vec::new();
       entry.read_to_end(&mut content)?;
 
-      Ok((path.clone(), ArchiveEntry::Concrete {
+      Ok((path.clone(), ConcreteEntry {
         header: header,
         path: path,
         bytes: content,
@@ -277,7 +274,7 @@ fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, input: &mut
     })
     .collect::<io::Result<Vec<_>>>()?
     .into_iter()
-    .collect::<BTreeMap<PathBuf, ArchiveEntry>>();
+    .collect::<BTreeMap<PathBuf, ConcreteEntry>>();
 
   // Merge the received elements into the list of archive
   // elements
@@ -294,6 +291,17 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
 
   // Ask the sender for the remaining lookup parts
   let archive_entries = merge_remote_entries(archive_entries, &mut input)?;
+
+  // Ensure all entries are concrete
+  let archive_entries = archive_entries
+    .into_iter()
+    .map(|entry| {
+      match entry {
+        ArchiveEntry::Concrete(c) => Ok(c),
+        _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry")),
+      }
+    })
+    .collect::<io::Result<Vec<ConcreteEntry>>>()?;
 
   // Translate the list of archive entries into an archive
   let mut output_path = PathBuf::from(destination_path);
