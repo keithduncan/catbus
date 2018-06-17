@@ -50,6 +50,11 @@ fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candida
   let index = File::open(candidate_index)?;
   let (_, want_list) = archive_entries_for_index(&index)?;
 
+  let extract_list = want_list
+    .into_iter()
+    .filter(|entry| wanted.contains(entry))
+    .collect::<Vec<_>>();
+
   Ok(Vec::new())
 }
 
