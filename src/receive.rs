@@ -120,7 +120,7 @@ fn finalise_output(archive_entries: Vec<ArchiveEntry>, output_path: &Path, index
   index_file.write_all(index)
 }
 
-fn read_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry>, BTreeMap<PathBuf, Vec<u8>>)> {
+fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry>, BTreeMap<PathBuf, Vec<u8>>)> {
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
   let index = tarball_codec::read("[receive-index]", read)?;
@@ -219,7 +219,7 @@ fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, want_list: 
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
   let mut input = BufReader::new(io::stdin());
 
-  let (index, archive_entries, want_list) = read_index(&mut input)?;
+  let (index, archive_entries, want_list) = read_remote_index(&mut input)?;
 
   // Start workers to scan the local library of parts
   let archive_entries = merge_local_entries(archive_entries, &want_list, destination_path);
@@ -232,5 +232,6 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   output_path.push(destination_file);
   let mut index_path = PathBuf::from(destination_path);
   index_path.push(format!("{}.idx", destination_file));
+  
   finalise_output(archive_entries, &output_path, &index, &index_path)
 }
