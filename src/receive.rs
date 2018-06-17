@@ -210,7 +210,5 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   index_path.push(format!("{}.idx", destination_file));
   let mut index_file = File::create(index_path)?;
   eprintln!("[receive-index] writing index tarball");
-  index_file.write_all(&index)?;
-
-  Ok(())
+  index_file.write_all(&index)
 }
