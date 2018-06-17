@@ -43,8 +43,11 @@ enum ArchiveEntry {
   },
 }
 
-fn find_entries(wanted: &BTreeMap<PathBuf, Vec<u8>>, candidate: &Path, candidate_index: &Path) -> Vec<(PathBuf, ArchiveEntry)> {
-  Vec::new()
+fn find_entries(wanted: &BTreeMap<PathBuf, Vec<u8>>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ArchiveEntry)>> {
+  let index = File::open(candidate_index)?;
+  let (index_entries, want_list) = archive_entries_for_index(&index)?;
+
+  Ok(Vec::new())
 }
 
 fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ArchiveEntry>) -> Vec<ArchiveEntry> {
@@ -141,48 +144,51 @@ fn finalise_output(archive_entries: Vec<ArchiveEntry>, output_path: &Path, index
   index_file.write_all(index)
 }
 
+fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>, BTreeMap<PathBuf, Vec<u8>>)> {
+  let mut want_list = BTreeMap::new();
+
+  // An index is always compressed
+  let decoder = gzip::Decoder::new(read)?;
+  let mut index_archive = tar::Archive::new(decoder);
+
+  let archive_entries = index_archive
+    .entries()?
+    .map(|entry| {
+      let mut entry = entry?;
+
+      let path = entry.path()?.to_path_buf();
+      let header = entry.header().clone();
+
+      let mut content = Vec::new();
+      entry.read_to_end(&mut content)?;
+
+      if header.entry_type().is_file() {
+        want_list.insert(path.clone(), content.clone());
+
+        Ok(ArchiveEntry::Lookup {
+          header: header,
+          path: path,
+          digest: content,
+        })
+      } else {
+        Ok(ArchiveEntry::Concrete {
+          header: header,
+          path: path,
+          bytes: content,
+        })
+      }
+    })
+    .collect::<io::Result<Vec<ArchiveEntry>>>()?;
+
+  Ok((archive_entries, want_list))
+}
+
 fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry>, BTreeMap<PathBuf, Vec<u8>>)> {
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
   let index = tarball_codec::read("[receive-index]", read)?;
 
-  // Collect the list of lookup
-  let mut want_list = BTreeMap::new();
-
-  let archive_entries: Vec<ArchiveEntry> = {
-    // The index is always compressed
-    let decoder = gzip::Decoder::new(index.as_slice())?;
-    let mut index_archive = tar::Archive::new(decoder);
-
-    index_archive
-      .entries()?
-      .map(|entry| {
-        let mut entry = entry?;
-
-        let path = entry.path()?.to_path_buf();
-        let header = entry.header().clone();
-
-        let mut content = Vec::new();
-        entry.read_to_end(&mut content)?;
-
-        if header.entry_type().is_file() {
-          want_list.insert(path.clone(), content.clone());
-
-          Ok(ArchiveEntry::Lookup {
-            header: header,
-            path: path,
-            digest: content,
-          })
-        } else {
-          Ok(ArchiveEntry::Concrete {
-            header: header,
-            path: path,
-            bytes: content,
-          })
-        }
-      })
-      .collect::<io::Result<Vec<ArchiveEntry>>>()?
-  };
+  let (archive_entries, want_list) = archive_entries_for_index(index.as_slice())?;
 
   Ok((index, archive_entries, want_list))
 }
@@ -196,7 +202,7 @@ fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeMap<
   let discovered_entries: BTreeMap<PathBuf, ArchiveEntry> = indexes
     .par_iter()
     .flat_map(|(index_path, tarball_path)| {
-      find_entries(&want_list, index_path, tarball_path)
+      find_entries(&want_list, index_path, tarball_path).unwrap_or(Vec::new())
     })
     .collect();
 
@@ -254,6 +260,6 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   output_path.push(destination_file);
   let mut index_path = PathBuf::from(destination_path);
   index_path.push(format!("{}.idx", destination_file));
-  
+
   finalise_output(archive_entries, &output_path, &index, &index_path)
 }
