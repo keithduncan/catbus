@@ -166,13 +166,11 @@ fn read_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<Arch
   Ok((index, archive_entries, want_list))
 }
 
-pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
-  let mut input = BufReader::new(io::stdin());
-
-  let (index, archive_entries, want_list) = read_index(&mut input)?;
-
-  // Start workers to scan the local library of parts
+fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeMap<PathBuf, Vec<u8>>, destination_path: &Path) -> Vec<ArchiveEntry> {
+  // Find adjacent indexes
   let indexes = discover_indexes(destination_path);
+
+  // Find the wanted entries in the adjacent indexes
   let discovered_entries: BTreeMap<PathBuf, ArchiveEntry> = indexes
     .par_iter()
     .flat_map(|(index_path, tarball_path)| {
@@ -182,7 +180,16 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
 
   // Merge the found elements into the list of archive
   // elements
-  let archive_entries = merge_entries(archive_entries, discovered_entries);
+  merge_entries(archive_entries, discovered_entries)
+}
+
+pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
+  let mut input = BufReader::new(io::stdin());
+
+  let (index, archive_entries, want_list) = read_index(&mut input)?;
+
+  // Start workers to scan the local library of parts
+  let archive_entries = merge_local_entries(archive_entries, &want_list, destination_path);
 
   // Ask the sender for the remaining lookup parts
   request_remaining_entries(&archive_entries)?;
