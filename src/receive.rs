@@ -50,12 +50,44 @@ fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candida
   let index = File::open(candidate_index)?;
   let (_, want_list) = archive_entries_for_index(&index)?;
 
-  let extract_list = want_list
+  let extract_list: BTreeSet<PathBuf> = want_list
     .into_iter()
-    .filter(|entry| wanted.contains(entry))
-    .collect::<Vec<_>>();
+    .filter_map(|entry| {
+      if wanted.contains(&entry) {
+        Some(entry.0)
+      } else {
+        None
+      }
+    })
+    .collect();
 
-  Ok(Vec::new())
+  let archive = File::open(candidate)?;
+  let mut archive = tar::Archive::new(archive);
+
+  let archive_entries = archive
+    .entries()?
+    .into_iter()
+    .filter_map(|entry| {
+      let mut entry = entry.ok()?;
+
+      let path = entry.path().ok()?.to_path_buf();
+
+      if extract_list.contains(&path) {
+        let mut content = Vec::new();
+        entry.read_to_end(&mut content).ok()?;
+
+        Some((path.clone(), ArchiveEntry::Concrete {
+          header: entry.header().clone(),
+          path: path,
+          bytes: content,
+        }))
+      } else {
+        None
+      }
+    })
+    .collect();
+
+  Ok(archive_entries)
 }
 
 fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ArchiveEntry>) -> Vec<ArchiveEntry> {
