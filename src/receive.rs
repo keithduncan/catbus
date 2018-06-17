@@ -93,20 +93,27 @@ fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candida
   Ok(archive_entries)
 }
 
-fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ConcreteEntry>) -> Vec<ArchiveEntry> {
-  entries
+fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ConcreteEntry>) -> (usize, Vec<ArchiveEntry>) {
+  let mut merged: usize = 0;
+
+  let entries = entries
     .into_iter()
     .map(|element| {
       match element {
         ArchiveEntry::Lookup { header, path, digest } => lookup
           .get(&path)
           .cloned()
-          .map(|concrete| ArchiveEntry::Concrete(concrete))
+          .map(|concrete| {
+            merged += concrete.bytes.len();
+            ArchiveEntry::Concrete(concrete)
+          })
           .unwrap_or(ArchiveEntry::Lookup { header, path, digest }),
         e => e,
       }
     })
-    .collect()
+    .collect();
+
+  (merged, entries)
 }
 
 // Search a directory for pairs of indexes and tarballs
@@ -230,7 +237,7 @@ fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, V
   Ok((index, archive_entries, want_list))
 }
 
-fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<(PathBuf, Vec<u8>)>, destination_path: &Path) -> Vec<ArchiveEntry> {
+fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<(PathBuf, Vec<u8>)>, destination_path: &Path) -> (usize, Vec<ArchiveEntry>) {
   // Find adjacent indexes
   let indexes = discover_indexes(destination_path);
   eprintln!("[receive-index] discover_indexes {:#?}", indexes);
@@ -248,7 +255,7 @@ fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<
   merge_entries(archive_entries, discovered_entries)
 }
 
-fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, input: &mut BufReader<T>) -> io::Result<Vec<ArchiveEntry>> {
+fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, input: &mut BufReader<T>) -> io::Result<(usize, Vec<ArchiveEntry>)> {
   request_remaining_entries(&archive_entries)?;
   eprintln!("[receive-index] receiving wanted tarball");
   // Read the tarball of wanted parts
@@ -287,10 +294,12 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
   let (index, archive_entries, want_list) = read_remote_index(&mut input)?;
 
   // Start workers to scan the local library of parts
-  let archive_entries = merge_local_entries(archive_entries, &want_list, destination_path);
+  let (merged_locally, archive_entries) = merge_local_entries(archive_entries, &want_list, destination_path);
+  eprintln!("[receive-index] merged {:?} bytes from local parts", merged_locally);
 
   // Ask the sender for the remaining lookup parts
-  let archive_entries = merge_remote_entries(archive_entries, &mut input)?;
+  let (merged_remotely, archive_entries) = merge_remote_entries(archive_entries, &mut input)?;
+  eprintln!("[receive-index] merged {:?} bytes from remote parts", merged_remotely);
 
   // Ensure all entries are concrete
   let archive_entries = archive_entries
