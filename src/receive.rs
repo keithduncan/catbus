@@ -102,7 +102,12 @@ fn find_entries(wanted: &HashSet<(PathBuf, ContentDigest)>, candidate: &Path, ca
   Ok(archive_entries)
 }
 
-fn merge_entries<'a>(entries: &mut Vec<ArchiveEntry<'a>>, lookup: &'a HashMap<PathBuf, ConcreteEntry>) -> usize {
+struct MergeResult {
+  merged: usize,
+  want_list: Vec<PathBuf>,
+}
+
+fn merge_entries<'a>(entries: &mut Vec<ArchiveEntry<'a>>, lookup: &'a HashMap<PathBuf, ConcreteEntry>) -> MergeResult {
   fn find_entry<'a>(element: &ArchiveEntry<'a>, lookup: &'a HashMap<PathBuf, ConcreteEntry>)
     -> Option<&'a ConcreteEntry>
   {
@@ -113,15 +118,23 @@ fn merge_entries<'a>(entries: &mut Vec<ArchiveEntry<'a>>, lookup: &'a HashMap<Pa
   }
 
   let mut merged: usize = 0;
+  let mut want_list = Vec::new();
 
   for element in entries {
     if let Some(c) = find_entry(element, lookup) {
       merged += c.bytes.len();
       *element = ArchiveEntry::Concrete(Cow::Borrowed(c));
     }
+
+    if let ArchiveEntry::Lookup { path, .. } = element {
+      want_list.push(path.clone());
+    }
   }
 
-  merged
+  MergeResult {
+    merged,
+    want_list,
+  }
 }
 
 // Search a directory for pairs of indexes and tarballs
@@ -147,20 +160,14 @@ fn discover_indexes(dir: &Path) -> Vec<(PathBuf, PathBuf)> {
     .unwrap_or(Vec::new())
 }
 
-fn request_remaining_entries(archive_entries: &[ArchiveEntry]) -> io::Result<()> {
+fn request_remaining_entries(want_list: &[PathBuf]) -> io::Result<()> {
   let mut stdout = BufWriter::new(io::stdout());
 
-  archive_entries
+  want_list
     .iter()
-    .map(|entry| {
-      match entry {
-        &ArchiveEntry::Lookup { ref header, ref path, .. } => {
-          // Tell sender we want it
-          eprintln!("[receive-index] sending want {:?} {:?}", header.entry_type(), path);
-          stdout.write_fmt(format_args!("{}\n", path.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "non UTF8 path"))?))
-        }
-        _ => Ok(())
-      }
+    .map(|path| {
+      eprintln!("[receive-index] sending want {:?}", path);
+      stdout.write_fmt(format_args!("{}\n", path.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "non UTF8 path"))?))
     })
     .collect::<io::Result<Vec<_>>>()?;
   // Tell the sender EOF so they send the want parts
@@ -271,8 +278,8 @@ fn find_local_entries(want_list: &HashSet<(PathBuf, ContentDigest)>, destination
     .collect::<HashMap<PathBuf, ConcreteEntry>>()
 }
 
-fn find_remote_entries<T: Read>(archive_entries: &[ArchiveEntry], input: &mut BufReader<T>) -> io::Result<HashMap<PathBuf, ConcreteEntry>> {
-  request_remaining_entries(&archive_entries)?;
+fn find_remote_entries<T: Read>(want_list: &[PathBuf], input: &mut BufReader<T>) -> io::Result<HashMap<PathBuf, ConcreteEntry>> {
+  request_remaining_entries(want_list)?;
   eprintln!("[receive-index] receiving wanted tarball");
   // Read the tarball of wanted parts
   let want = tarball_codec::read("[receive-index]", input)?;
@@ -300,21 +307,28 @@ fn find_remote_entries<T: Read>(archive_entries: &[ArchiveEntry], input: &mut Bu
     .collect::<HashMap<PathBuf, ConcreteEntry>>())
 }
 
-pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
+#[derive(Debug)]
+pub enum ReceiveIndexError {
+  Io(io::Error),
+  NonConcreteEntry(PathBuf),
+}
+
+pub fn receive_index(destination_path: &Path, destination_file: &str) -> Result<(), ReceiveIndexError> {
   let mut input = BufReader::new(io::stdin());
 
   let local_entries;
   let remote_entries;
-  let (index, mut archive_entries, want_list) = read_remote_index(&mut input)?;
+  let (index, mut archive_entries, want_list) = read_remote_index(&mut input)
+    .map_err(ReceiveIndexError::Io)?;
 
   // Start workers to scan the local library of parts
   local_entries = find_local_entries(&want_list, destination_path);
-  let merged_locally = merge_entries(&mut archive_entries, &local_entries);
+  let MergeResult { merged: merged_locally, want_list } = merge_entries(&mut archive_entries, &local_entries);
   eprintln!("[receive-index] merged {:?} bytes from local parts", merged_locally);
 
   // Ask the sender for the remaining lookup parts
-  remote_entries = find_remote_entries(&archive_entries, &mut input)?;
-  let merged_remotely = merge_entries(&mut archive_entries, &remote_entries);
+  remote_entries = find_remote_entries(&want_list, &mut input).map_err(ReceiveIndexError::Io)?;
+  let MergeResult { merged: merged_remotely, .. } = merge_entries(&mut archive_entries, &remote_entries);
   eprintln!("[receive-index] merged {:?} bytes from remote parts", merged_remotely);
 
   // Ensure all entries are concrete
