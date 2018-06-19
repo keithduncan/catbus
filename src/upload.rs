@@ -15,7 +15,18 @@ extern crate tar;
 
 extern crate libc;
 
-pub fn upload_index(tar_path: &str, index_path: &str) -> io::Result<()> {
+#[derive(Debug)]
+pub enum UploadIndexError {
+  Io(io::Error),
+}
+
+impl From<io::Error> for UploadIndexError {
+  fn from(e: io::Error) -> Self {
+    UploadIndexError::Io(e)
+  }
+}
+
+pub fn upload_index(tar_path: &str, index_path: &str) -> Result<(), UploadIndexError> {
   // Output on stdout
   let mut stdout = io::stdout();
 
