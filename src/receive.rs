@@ -35,13 +35,15 @@ extern crate libc;
 extern crate rayon;
 use self::rayon::prelude::*;
 
+type ContentDigest = Vec<u8>;
+
 #[derive(Clone)]
 enum ArchiveEntry<'a> {
   Concrete(Cow<'a, ConcreteEntry>),
   Lookup {
     header: tar::Header,
     path: PathBuf,
-    digest: Vec<u8>,
+    digest: ContentDigest,
   },
 }
 
@@ -52,7 +54,7 @@ struct ConcreteEntry {
   bytes: Vec<u8>,
 }
 
-fn find_entries(wanted: &HashSet<(PathBuf, Vec<u8>)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ConcreteEntry)>> {
+fn find_entries(wanted: &HashSet<(PathBuf, ContentDigest)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ConcreteEntry)>> {
   let index = BufReader::new(File::open(candidate_index)?);
   let (_, want_list) = archive_entries_for_index(index)?;
 
@@ -194,7 +196,7 @@ fn finalise_output(archive_entries: Vec<Cow<ConcreteEntry>>, output_path: &Path,
   index_file.write_all(index)
 }
 
-fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry<'a>>, HashSet<(PathBuf, Vec<u8>)>)> {
+fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry<'a>>, HashSet<(PathBuf, ContentDigest)>)> {
   let mut want_list = HashSet::new();
 
   // An index is always compressed
@@ -233,7 +235,7 @@ fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEnt
   Ok((archive_entries, want_list))
 }
 
-fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry<'b>>, HashSet<(PathBuf, Vec<u8>)>)> {
+fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry<'b>>, HashSet<(PathBuf, ContentDigest)>)> {
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
   let index = tarball_codec::read("[receive-index]", read)?;
@@ -243,7 +245,7 @@ fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<
   Ok((index, archive_entries, want_list))
 }
 
-fn find_local_entries(want_list: &HashSet<(PathBuf, Vec<u8>)>, destination_path: &Path) -> HashMap<PathBuf, ConcreteEntry> {
+fn find_local_entries(want_list: &HashSet<(PathBuf, ContentDigest)>, destination_path: &Path) -> HashMap<PathBuf, ConcreteEntry> {
   // Find adjacent indexes
   let indexes = discover_indexes(destination_path);
   eprintln!("[receive-index] discover_indexes {:#?}", indexes);
