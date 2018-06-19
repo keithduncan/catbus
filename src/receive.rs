@@ -182,8 +182,7 @@ fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ConcreteEntry>, wr
 }
 
 fn finalise_output(archive_entries: Vec<ConcreteEntry>, output_path: &Path, index: &[u8], index_path: &Path) -> io::Result<()> {
-  // PERF 1.63s spent writing to this file, use a BufWriter?
-  let output_file = File::create(output_path)?;
+  let output_file = BufWriter::new(File::create(output_path)?);
   eprintln!("[receive-index] writing output tarball");
   serialise_entries_to_writer(archive_entries, output_file)?;
 
