@@ -337,10 +337,10 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> Result<
     .map(|entry| {
       match entry {
         ArchiveEntry::Concrete(c) => Ok(c),
-        _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry")),
+        ArchiveEntry::Lookup { path, ..} => Err(ReceiveIndexError::NonConcreteEntry(path)),
       }
     })
-    .collect::<io::Result<Vec<Cow<ConcreteEntry>>>>()?;
+    .collect::<Result<Vec<_>, _>>()?;
 
   // Translate the list of archive entries into an archive
   let mut output_path = PathBuf::from(destination_path);
@@ -349,4 +349,5 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> Result<
   index_path.push(format!("{}.idx", destination_file));
 
   finalise_output(archive_entries, &output_path, &index, &index_path)
+    .map_err(ReceiveIndexError::Io)
 }
