@@ -167,7 +167,7 @@ fn request_remaining_entries(want_list: &[PathBuf]) -> io::Result<()> {
     .iter()
     .map(|path| {
       eprintln!("[receive-index] sending want {:?}", path);
-      stdout.write_fmt(format_args!("{}\n", path.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "non UTF8 path"))?))
+      write!(stdout, "{}\n", path.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "non UTF8 path"))?)
     })
     .collect::<io::Result<Vec<_>>>()?;
   // Tell the sender EOF so they send the want parts
