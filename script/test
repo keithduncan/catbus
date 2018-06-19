@@ -11,5 +11,5 @@ trap "rm tmp/pipe" EXIT
 
 file="${FILE:-3e9743acfb2781c1432f0811542d1f9bc0655aef-jessie-x86_64.tar}"
 
-$binary transport upload-index --file tmp/builds/$file --index tmp/builds/$file.idx <tmp/pipe 2>tmp/upload-err | \
+time $binary transport upload-index --file tmp/builds/$file --index tmp/builds/$file.idx <tmp/pipe 2>tmp/upload-err | \
 $binary transport receive-index --destination tmp/output --file $file >tmp/pipe 2>tmp/receive-err
