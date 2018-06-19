@@ -52,8 +52,8 @@ struct ConcreteEntry {
 }
 
 fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ConcreteEntry)>> {
-  let index = File::open(candidate_index)?;
-  let (_, want_list) = archive_entries_for_index(&index)?;
+  let index = BufReader::new(File::open(candidate_index)?);
+  let (_, want_list) = archive_entries_for_index(index)?;
 
   let extract_list: BTreeSet<PathBuf> = want_list
     .into_iter()
