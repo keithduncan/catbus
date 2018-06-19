@@ -104,6 +104,7 @@ fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ConcreteE
       match element {
         ArchiveEntry::Lookup { header, path, digest } => lookup
           .get(&path)
+          // PERF remove this and add COW support to concrete
           .cloned()
           .map(|concrete| {
             merged += concrete.bytes.len();
@@ -181,6 +182,7 @@ fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ConcreteEntry>, wr
 }
 
 fn finalise_output(archive_entries: Vec<ConcreteEntry>, output_path: &Path, index: &[u8], index_path: &Path) -> io::Result<()> {
+  // PERF 1.63s spent writing to this file, use a BufWriter?
   let output_file = File::create(output_path)?;
   eprintln!("[receive-index] writing output tarball");
   serialise_entries_to_writer(archive_entries, output_file)?;
@@ -261,6 +263,7 @@ fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<
 
       entries
     })
+    // PERF this is taking 1.2s on the sample data to extend these into a useful collection
     .collect();
 
   // Merge the found elements into the list of archive
