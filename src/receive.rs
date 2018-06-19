@@ -1,4 +1,6 @@
 use std::{
+  thread,
+  time,
   path::{
     Path,
     PathBuf,
@@ -246,11 +248,18 @@ fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<
   let discovered_entries: BTreeMap<PathBuf, ConcreteEntry> = indexes
     .par_iter()
     .flat_map(|(index_path, tarball_path)| {
-      find_entries(&want_list, tarball_path, index_path)
+      let now = time::Instant::now();
+      eprintln!("thread id {:?}, now {:?}, index {:?}", thread::current().id(), now, index_path);
+
+      let entries = find_entries(&want_list, tarball_path, index_path)
         .map_err(|e| {
           eprintln!("discover_error {:#?}", e)
         })
-        .unwrap_or(Vec::new())
+        .unwrap_or(Vec::new());
+
+      eprintln!("thread id {:?}, elapsed {:?}", thread::current().id(), now.elapsed());
+
+      entries
     })
     .collect();
 
