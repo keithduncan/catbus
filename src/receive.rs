@@ -17,8 +17,8 @@ use std::{
     File,
   },
   collections::{
-    BTreeSet,
-    BTreeMap,
+    HashSet,
+    HashMap,
   },
   borrow::Cow,
 };
@@ -52,11 +52,11 @@ struct ConcreteEntry {
   bytes: Vec<u8>,
 }
 
-fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ConcreteEntry)>> {
+fn find_entries(wanted: &HashSet<(PathBuf, Vec<u8>)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ConcreteEntry)>> {
   let index = BufReader::new(File::open(candidate_index)?);
   let (_, want_list) = archive_entries_for_index(index)?;
 
-  let extract_list: BTreeSet<PathBuf> = want_list
+  let extract_list: HashSet<PathBuf> = want_list
     .into_iter()
     .filter_map(|entry| {
       if wanted.contains(&entry) {
@@ -100,8 +100,8 @@ fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candida
   Ok(archive_entries)
 }
 
-fn merge_entries<'a>(entries: &mut Vec<ArchiveEntry<'a>>, lookup: &'a BTreeMap<PathBuf, ConcreteEntry>) -> usize {
-  fn find_entry<'a>(element: &ArchiveEntry<'a>, lookup: &'a BTreeMap<PathBuf, ConcreteEntry>)
+fn merge_entries<'a>(entries: &mut Vec<ArchiveEntry<'a>>, lookup: &'a HashMap<PathBuf, ConcreteEntry>) -> usize {
+  fn find_entry<'a>(element: &ArchiveEntry<'a>, lookup: &'a HashMap<PathBuf, ConcreteEntry>)
     -> Option<&'a ConcreteEntry>
   {
     match element {
@@ -194,8 +194,8 @@ fn finalise_output(archive_entries: Vec<Cow<ConcreteEntry>>, output_path: &Path,
   index_file.write_all(index)
 }
 
-fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry<'a>>, BTreeSet<(PathBuf, Vec<u8>)>)> {
-  let mut want_list = BTreeSet::new();
+fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry<'a>>, HashSet<(PathBuf, Vec<u8>)>)> {
+  let mut want_list = HashSet::new();
 
   // An index is always compressed
   let decoder = gzip::Decoder::new(read)?;
@@ -233,7 +233,7 @@ fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEnt
   Ok((archive_entries, want_list))
 }
 
-fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry<'b>>, BTreeSet<(PathBuf, Vec<u8>)>)> {
+fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry<'b>>, HashSet<(PathBuf, Vec<u8>)>)> {
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
   let index = tarball_codec::read("[receive-index]", read)?;
@@ -243,7 +243,7 @@ fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<
   Ok((index, archive_entries, want_list))
 }
 
-fn find_local_entries(want_list: &BTreeSet<(PathBuf, Vec<u8>)>, destination_path: &Path) -> BTreeMap<PathBuf, ConcreteEntry> {
+fn find_local_entries(want_list: &HashSet<(PathBuf, Vec<u8>)>, destination_path: &Path) -> HashMap<PathBuf, ConcreteEntry> {
   // Find adjacent indexes
   let indexes = discover_indexes(destination_path);
   eprintln!("[receive-index] discover_indexes {:#?}", indexes);
@@ -266,10 +266,10 @@ fn find_local_entries(want_list: &BTreeSet<(PathBuf, Vec<u8>)>, destination_path
       entries
     })
     // PERF this is taking 1.2s on the sample data to extend these into a useful collection
-    .collect::<BTreeMap<PathBuf, ConcreteEntry>>()
+    .collect::<HashMap<PathBuf, ConcreteEntry>>()
 }
 
-fn find_remote_entries<T: Read>(archive_entries: &[ArchiveEntry], input: &mut BufReader<T>) -> io::Result<BTreeMap<PathBuf, ConcreteEntry>> {
+fn find_remote_entries<T: Read>(archive_entries: &[ArchiveEntry], input: &mut BufReader<T>) -> io::Result<HashMap<PathBuf, ConcreteEntry>> {
   request_remaining_entries(&archive_entries)?;
   eprintln!("[receive-index] receiving wanted tarball");
   // Read the tarball of wanted parts
@@ -295,7 +295,7 @@ fn find_remote_entries<T: Read>(archive_entries: &[ArchiveEntry], input: &mut Bu
     })
     .collect::<io::Result<Vec<_>>>()?
     .into_iter()
-    .collect::<BTreeMap<PathBuf, ConcreteEntry>>())
+    .collect::<HashMap<PathBuf, ConcreteEntry>>())
 }
 
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {

@@ -6,7 +6,7 @@ use std::{
     BufReader,
   },
   fs::File,
-  collections::BTreeSet,
+  collections::HashSet,
 };
 
 use tarball_codec;
@@ -24,7 +24,7 @@ pub fn upload_index(tar_path: &str, index_path: &str) -> io::Result<()> {
   let mut index_file = File::open(index_path)?;
   tarball_codec::write("[upload-index]", &mut index_file, &mut stdout)?;
 
-  let mut want_list = BTreeSet::new();
+  let mut want_list = HashSet::new();
 
   // Wait to read requested parts on stdin
   eprintln!("[upload-index] reading want lines");
