@@ -6,7 +6,9 @@ use std::{
     BufReader,
   },
   fs::File,
-  collections::HashSet,
+  collections::{
+    HashSet as Set
+  },
 };
 
 use tarball_codec;
@@ -35,7 +37,7 @@ pub fn upload_index(tar_path: &str, index_path: &str) -> Result<(), UploadIndexE
   let mut index_file = File::open(index_path)?;
   tarball_codec::write("[upload-index]", &mut index_file, &mut stdout)?;
 
-  let mut want_list = HashSet::new();
+  let mut want_list = Set::new();
 
   // Wait to read requested parts on stdin
   eprintln!("[upload-index] reading want lines");

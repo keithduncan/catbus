@@ -17,8 +17,8 @@ use std::{
     File,
   },
   collections::{
-    HashSet,
-    HashMap,
+    HashSet as Set,
+    HashMap as Map,
   },
   borrow::Cow,
 };
@@ -54,11 +54,11 @@ struct ConcreteEntry {
   bytes: Vec<u8>,
 }
 
-fn find_entries(wanted: &HashSet<(PathBuf, ContentDigest)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ConcreteEntry)>> {
+fn find_entries(wanted: &Set<(PathBuf, ContentDigest)>, candidate: &Path, candidate_index: &Path) -> io::Result<Vec<(PathBuf, ConcreteEntry)>> {
   let index = BufReader::new(File::open(candidate_index)?);
   let (_, want_list) = archive_entries_for_index(index)?;
 
-  let extract_list: HashSet<PathBuf> = want_list
+  let extract_list: Set<PathBuf> = want_list
     .into_iter()
     .filter_map(|entry| {
       if wanted.contains(&entry) {
@@ -107,8 +107,8 @@ struct MergeResult {
   want_list: Vec<PathBuf>,
 }
 
-fn merge_entries<'a>(entries: &mut Vec<ArchiveEntry<'a>>, lookup: &'a HashMap<PathBuf, ConcreteEntry>) -> MergeResult {
-  fn find_entry<'a>(element: &ArchiveEntry<'a>, lookup: &'a HashMap<PathBuf, ConcreteEntry>)
+fn merge_entries<'a>(entries: &mut Vec<ArchiveEntry<'a>>, lookup: &'a Map<PathBuf, ConcreteEntry>) -> MergeResult {
+  fn find_entry<'a>(element: &ArchiveEntry<'a>, lookup: &'a Map<PathBuf, ConcreteEntry>)
     -> Option<&'a ConcreteEntry>
   {
     match element {
@@ -200,8 +200,8 @@ fn finalise_output(archive_entries: Vec<Cow<ConcreteEntry>>, output_path: &Path,
   index_file.write_all(index)
 }
 
-fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry<'a>>, HashSet<(PathBuf, ContentDigest)>)> {
-  let mut want_list = HashSet::new();
+fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry<'a>>, Set<(PathBuf, ContentDigest)>)> {
+  let mut want_list = Set::new();
 
   // An index is always compressed
   let decoder = gzip::Decoder::new(read)?;
@@ -239,7 +239,7 @@ fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEnt
   Ok((archive_entries, want_list))
 }
 
-fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry<'b>>, HashSet<(PathBuf, ContentDigest)>)> {
+fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry<'b>>, Set<(PathBuf, ContentDigest)>)> {
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
   let index = tarball_codec::read("[receive-index]", read)?;
@@ -249,7 +249,7 @@ fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<
   Ok((index, archive_entries, want_list))
 }
 
-fn find_local_entries(want_list: &HashSet<(PathBuf, ContentDigest)>, destination_path: &Path) -> HashMap<PathBuf, ConcreteEntry> {
+fn find_local_entries(want_list: &Set<(PathBuf, ContentDigest)>, destination_path: &Path) -> Map<PathBuf, ConcreteEntry> {
   // Find adjacent indexes
   let indexes = discover_indexes(destination_path);
   eprintln!("[receive-index] discover_indexes {:#?}", indexes);
@@ -272,10 +272,10 @@ fn find_local_entries(want_list: &HashSet<(PathBuf, ContentDigest)>, destination
       entries
     })
     // PERF this is taking 1.2s on the sample data to extend these into a useful collection
-    .collect::<HashMap<PathBuf, ConcreteEntry>>()
+    .collect::<Map<PathBuf, ConcreteEntry>>()
 }
 
-fn find_remote_entries<T: Read>(want_list: &[PathBuf], input: &mut BufReader<T>) -> io::Result<HashMap<PathBuf, ConcreteEntry>> {
+fn find_remote_entries<T: Read>(want_list: &[PathBuf], input: &mut BufReader<T>) -> io::Result<Map<PathBuf, ConcreteEntry>> {
   request_remaining_entries(want_list)?;
   eprintln!("[receive-index] receiving wanted tarball");
   // Read the tarball of wanted parts
@@ -301,7 +301,7 @@ fn find_remote_entries<T: Read>(want_list: &[PathBuf], input: &mut BufReader<T>)
     })
     .collect::<io::Result<Vec<_>>>()?
     .into_iter()
-    .collect::<HashMap<PathBuf, ConcreteEntry>>())
+    .collect::<Map<PathBuf, ConcreteEntry>>())
 }
 
 #[derive(Debug)]
