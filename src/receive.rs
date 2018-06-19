@@ -67,7 +67,11 @@ fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candida
     })
     .collect();
 
-  let archive = File::open(candidate)?;
+  if extract_list.len() == 0 {
+    return Ok(Vec::new())
+  }
+
+  let archive = BufReader::new(File::open(candidate)?);
   let mut archive = tar::Archive::new(archive);
 
   let archive_entries = archive
