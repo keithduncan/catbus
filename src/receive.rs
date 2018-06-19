@@ -182,13 +182,10 @@ fn request_remaining_entries(want_list: &[PathBuf]) -> io::Result<()> {
 fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<Cow<ConcreteEntry>>, write: T) -> io::Result<()> {
   let mut output_builder = tar::Builder::new(write);
 
-  archive_entries
-    .into_iter()
-    .map(|entry| {
-      let mut header = entry.header.clone();
-      output_builder.append_data(&mut header, &entry.path, entry.bytes.as_slice())
-    })
-    .collect::<io::Result<Vec<()>>>()?;
+  for entry in archive_entries {
+    let mut header = entry.header.clone();
+    output_builder.append_data(&mut header, &entry.path, entry.bytes.as_slice())?;
+  }
 
   output_builder.into_inner()?.flush()
 }
