@@ -20,6 +20,7 @@ use std::{
     BTreeSet,
     BTreeMap,
   },
+  borrow::Cow,
 };
 
 use tarball_codec;
@@ -35,8 +36,8 @@ extern crate rayon;
 use self::rayon::prelude::*;
 
 #[derive(Clone)]
-enum ArchiveEntry {
-  Concrete(ConcreteEntry),
+enum ArchiveEntry<'a> {
+  Concrete(Cow<'a, ConcreteEntry>),
   Lookup {
     header: tar::Header,
     path: PathBuf,
@@ -95,28 +96,26 @@ fn find_entries(wanted: &BTreeSet<(PathBuf, Vec<u8>)>, candidate: &Path, candida
   Ok(archive_entries)
 }
 
-fn merge_entries(entries: Vec<ArchiveEntry>, lookup: BTreeMap<PathBuf, ConcreteEntry>) -> (usize, Vec<ArchiveEntry>) {
+fn merge_entries<'a>(entries: &mut Vec<ArchiveEntry<'a>>, lookup: &'a BTreeMap<PathBuf, ConcreteEntry>) -> usize {
+  fn find_entry<'a>(element: &ArchiveEntry<'a>, lookup: &'a BTreeMap<PathBuf, ConcreteEntry>)
+    -> Option<&'a ConcreteEntry>
+  {
+    match element {
+      ArchiveEntry::Lookup { path, .. } => lookup.get(path),
+      _ => None,
+    }
+  }
+
   let mut merged: usize = 0;
 
-  let entries = entries
-    .into_iter()
-    .map(|element| {
-      match element {
-        ArchiveEntry::Lookup { header, path, digest } => lookup
-          .get(&path)
-          // PERF remove this and add COW support to concrete
-          .cloned()
-          .map(|concrete| {
-            merged += concrete.bytes.len();
-            ArchiveEntry::Concrete(concrete)
-          })
-          .unwrap_or(ArchiveEntry::Lookup { header, path, digest }),
-        e => e,
-      }
-    })
-    .collect();
+  for element in entries {
+    if let Some(c) = find_entry(element, lookup) {
+      merged += c.bytes.len();
+      *element = ArchiveEntry::Concrete(Cow::Borrowed(c));
+    }
+  }
 
-  (merged, entries)
+  merged
 }
 
 // Search a directory for pairs of indexes and tarballs
@@ -149,7 +148,7 @@ fn request_remaining_entries(archive_entries: &[ArchiveEntry]) -> io::Result<()>
     .iter()
     .map(|entry| {
       match entry {
-        &ArchiveEntry::Lookup { ref header, ref path, ref digest } => {
+        &ArchiveEntry::Lookup { ref header, ref path, .. } => {
           // Tell sender we want it
           eprintln!("[receive-index] sending want {:?} {:?}", header.entry_type(), path);
           stdout.write_fmt(format_args!("{}\n", path.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "non UTF8 path"))?))
@@ -167,21 +166,21 @@ fn request_remaining_entries(archive_entries: &[ArchiveEntry]) -> io::Result<()>
   Ok(())
 }
 
-fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<ConcreteEntry>, write: T) -> io::Result<()> {
+fn serialise_entries_to_writer<T: Write>(archive_entries: Vec<Cow<ConcreteEntry>>, write: T) -> io::Result<()> {
   let mut output_builder = tar::Builder::new(write);
 
   archive_entries
     .into_iter()
-    .map(|mut entry| {
-      output_builder.append_data(&mut entry.header, entry.path, entry.bytes.as_slice())
+    .map(|entry| {
+      let mut header = entry.header.clone();
+      output_builder.append_data(&mut header, &entry.path, entry.bytes.as_slice())
     })
     .collect::<io::Result<Vec<()>>>()?;
 
-  let mut output = output_builder.into_inner()?;
-  output.flush()
+  output_builder.into_inner()?.flush()
 }
 
-fn finalise_output(archive_entries: Vec<ConcreteEntry>, output_path: &Path, index: &[u8], index_path: &Path) -> io::Result<()> {
+fn finalise_output(archive_entries: Vec<Cow<ConcreteEntry>>, output_path: &Path, index: &[u8], index_path: &Path) -> io::Result<()> {
   let output_file = BufWriter::new(File::create(output_path)?);
   eprintln!("[receive-index] writing output tarball");
   serialise_entries_to_writer(archive_entries, output_file)?;
@@ -191,7 +190,7 @@ fn finalise_output(archive_entries: Vec<ConcreteEntry>, output_path: &Path, inde
   index_file.write_all(index)
 }
 
-fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>, BTreeSet<(PathBuf, Vec<u8>)>)> {
+fn archive_entries_for_index<'a, T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry<'a>>, BTreeSet<(PathBuf, Vec<u8>)>)> {
   let mut want_list = BTreeSet::new();
 
   // An index is always compressed
@@ -218,11 +217,11 @@ fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>,
           digest: content,
         })
       } else {
-        Ok(ArchiveEntry::Concrete(ConcreteEntry {
+        Ok(ArchiveEntry::Concrete(Cow::Owned(ConcreteEntry {
           header: header,
           path: path,
           bytes: content,
-        }))
+        })))
       }
     })
     .collect::<io::Result<Vec<ArchiveEntry>>>()?;
@@ -230,7 +229,7 @@ fn archive_entries_for_index<T: Read>(read: T) -> io::Result<(Vec<ArchiveEntry>,
   Ok((archive_entries, want_list))
 }
 
-fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry>, BTreeSet<(PathBuf, Vec<u8>)>)> {
+fn read_remote_index<'a, 'b, T: Read>(read: &'a mut BufReader<T>) -> io::Result<(Vec<u8>, Vec<ArchiveEntry<'b>>, BTreeSet<(PathBuf, Vec<u8>)>)> {
   // Read the index
   eprintln!("[receive-index] receiving index tarball");
   let index = tarball_codec::read("[receive-index]", read)?;
@@ -240,13 +239,13 @@ fn read_remote_index<T: Read>(read: &mut BufReader<T>) -> io::Result<(Vec<u8>, V
   Ok((index, archive_entries, want_list))
 }
 
-fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<(PathBuf, Vec<u8>)>, destination_path: &Path) -> (usize, Vec<ArchiveEntry>) {
+fn find_local_entries(want_list: &BTreeSet<(PathBuf, Vec<u8>)>, destination_path: &Path) -> BTreeMap<PathBuf, ConcreteEntry> {
   // Find adjacent indexes
   let indexes = discover_indexes(destination_path);
   eprintln!("[receive-index] discover_indexes {:#?}", indexes);
 
   // Find the wanted entries in the adjacent indexes
-  let discovered_entries: BTreeMap<PathBuf, ConcreteEntry> = indexes
+  indexes
     .par_iter()
     .flat_map(|(index_path, tarball_path)| {
       let now = time::Instant::now();
@@ -263,21 +262,17 @@ fn merge_local_entries(archive_entries: Vec<ArchiveEntry>, want_list: &BTreeSet<
       entries
     })
     // PERF this is taking 1.2s on the sample data to extend these into a useful collection
-    .collect();
-
-  // Merge the found elements into the list of archive
-  // elements
-  merge_entries(archive_entries, discovered_entries)
+    .collect::<BTreeMap<PathBuf, ConcreteEntry>>()
 }
 
-fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, input: &mut BufReader<T>) -> io::Result<(usize, Vec<ArchiveEntry>)> {
+fn find_remote_entries<T: Read>(archive_entries: &[ArchiveEntry], input: &mut BufReader<T>) -> io::Result<BTreeMap<PathBuf, ConcreteEntry>> {
   request_remaining_entries(&archive_entries)?;
   eprintln!("[receive-index] receiving wanted tarball");
   // Read the tarball of wanted parts
   let want = tarball_codec::read("[receive-index]", input)?;
   let mut want_archive = tar::Archive::new(want.as_slice());
 
-  let want_archive_entries_by_path = want_archive
+  Ok(want_archive
     .entries()?
     .map(|entry| {
       let mut entry = entry?;
@@ -296,24 +291,24 @@ fn merge_remote_entries<T: Read>(archive_entries: Vec<ArchiveEntry>, input: &mut
     })
     .collect::<io::Result<Vec<_>>>()?
     .into_iter()
-    .collect::<BTreeMap<PathBuf, ConcreteEntry>>();
-
-  // Merge the received elements into the list of archive
-  // elements
-  Ok(merge_entries(archive_entries, want_archive_entries_by_path))
+    .collect::<BTreeMap<PathBuf, ConcreteEntry>>())
 }
 
 pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Result<()> {
   let mut input = BufReader::new(io::stdin());
 
-  let (index, archive_entries, want_list) = read_remote_index(&mut input)?;
+  let local_entries;
+  let remote_entries;
+  let (index, mut archive_entries, want_list) = read_remote_index(&mut input)?;
 
   // Start workers to scan the local library of parts
-  let (merged_locally, archive_entries) = merge_local_entries(archive_entries, &want_list, destination_path);
+  local_entries = find_local_entries(&want_list, destination_path);
+  let merged_locally = merge_entries(&mut archive_entries, &local_entries);
   eprintln!("[receive-index] merged {:?} bytes from local parts", merged_locally);
 
   // Ask the sender for the remaining lookup parts
-  let (merged_remotely, archive_entries) = merge_remote_entries(archive_entries, &mut input)?;
+  remote_entries = find_remote_entries(&archive_entries, &mut input)?;
+  let merged_remotely = merge_entries(&mut archive_entries, &remote_entries);
   eprintln!("[receive-index] merged {:?} bytes from remote parts", merged_remotely);
 
   // Ensure all entries are concrete
@@ -325,7 +320,7 @@ pub fn receive_index(destination_path: &Path, destination_file: &str) -> io::Res
         _ => Err(io::Error::new(io::ErrorKind::Other, "non concrete entry")),
       }
     })
-    .collect::<io::Result<Vec<ConcreteEntry>>>()?;
+    .collect::<io::Result<Vec<Cow<ConcreteEntry>>>>()?;
 
   // Translate the list of archive entries into an archive
   let mut output_path = PathBuf::from(destination_path);
