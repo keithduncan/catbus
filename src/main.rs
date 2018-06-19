@@ -15,6 +15,13 @@ extern crate digest;
 extern crate catbus;
 use catbus::{index, upload, receive};
 
+#[derive(Debug)]
+enum MainError {
+  IndexError(IndexError),
+  TransportError(TransportError),
+  UnknownCommand,
+}
+
 fn main() {
   let matches = App::new("catbus")
     .version("1.0")
@@ -89,10 +96,12 @@ fn main() {
 
   let result = if let Some(matches) = matches.subcommand_matches("index") {
     index(matches)
+      .map_err(MainError::IndexError)
   } else if let Some(matches) = matches.subcommand_matches("transport") {
     transport(matches)
+      .map_err(MainError::TransportError)
   } else {
-    Err(io::Error::new(io::ErrorKind::Other, "unknown command"))
+    Err(MainError::UnknownCommand)
   };
 
   match result {
@@ -101,11 +110,18 @@ fn main() {
   }
 }
 
-fn index(matches: &clap::ArgMatches) -> io::Result<()> {
+#[derive(Debug)]
+enum IndexError {
+  CreateIndex(io::Error),
+  UnknownCommand,
+}
+
+fn index(matches: &clap::ArgMatches) -> Result<(), IndexError> {
   if let Some(matches) = matches.subcommand_matches("create") {
     create_index(matches)
+      .map_err(IndexError::CreateIndex)
   } else {
-    Err(io::Error::new(io::ErrorKind::Other, "unknown command"))
+    Err(IndexError::UnknownCommand)
   }
 }
 
@@ -119,18 +135,27 @@ fn create_index(matches: &clap::ArgMatches) -> io::Result<()> {
   Ok(())
 }
 
-fn transport(matches: &clap::ArgMatches) -> io::Result<()> {
+#[derive(Debug)]
+enum TransportError {
+  UploadIndex(upload::UploadIndexError),
+  ReceiveIndex(receive::ReceiveIndexError),
+  UnknownCommand,
+}
+
+fn transport(matches: &clap::ArgMatches) -> Result<(), TransportError> {
   if let Some(matches) = matches.subcommand_matches("upload-index") {
     let tar_path = matches.value_of("file").expect("file arg required");
     let index_path = matches.value_of("index").expect("index arg required");
 
     upload::upload_index(tar_path, index_path)
+      .map_err(TransportError::UploadIndex)
   } else if let Some(matches) = matches.subcommand_matches("receive-index") {
     let destination_path = matches.value_of("destination").expect("destination arg required");
     let destination_file = matches.value_of("file").expect("file arg required");
 
     receive::receive_index(destination_path.as_ref(), destination_file)
+      .map_err(TransportError::ReceiveIndex)
   } else {
-    Err(io::Error::new(io::ErrorKind::Other, "unknown command"))
+    Err(TransportError::UnknownCommand)
   }
 }
