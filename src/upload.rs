@@ -44,7 +44,7 @@ pub fn upload_index(tar_path: &str, index_path: &str) -> io::Result<()> {
     .collect::<io::Result<Vec<()>>>()?;
 
   // Iterate the tar_path archive and accumulate the wanted entries
-  let tar_file = File::open(tar_path)?;
+  let tar_file = BufReader::new(File::open(tar_path)?);
   let mut tar_archive = tar::Archive::new(tar_file);
 
   let mut want_builder = tar::Builder::new(Vec::new());
