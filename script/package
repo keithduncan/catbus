@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -exuo pipefail
+
+MODE=release script/build
+
+file target/release/catbus
+
+mkdir -p tmp/packages
+build_arch="$(lsb_release -sc | tr -d ' ' | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+package_name="catbus-${build_arch}"
+tar -czf "tmp/packages/$package_name.tar.gz" -C target/release catbus

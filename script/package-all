@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -euxo pipefail
+
+mkdir -p tmp/cache
+
+envs="${ENVS:-ubuntu/precise debian/jessie debian/stretch}"
+for env in $envs
+do
+  tag="catbus/build/$env"
+  pushd "docker/$env"
+  docker build -t "$tag" -f Dockerfile .
+  popd
+
+  docker run \
+    --rm \
+    --volume $PWD:/workspace \
+    --volume $HOME/.cargo/registry:/root/.cargo/registry \
+    --workdir /workspace \
+    --env SCCACHE_DIR=/workspace/tmp/cache \
+    "$tag" \
+    script/package
+done
