@@ -25,7 +25,7 @@ _Generated using https://sequencediagram.org/_
 1. The sender generates an in-memory archive of the missing parts and sends it
 1. The receiver inserts the missing parts and serialises the full archive
 
-## How to build
+## How to build it
 
 catbus is built using cargo and rust.
 
@@ -33,3 +33,16 @@ catbus is built using cargo and rust.
 cd ~/catbus
 cargo build
 ```
+
+## When to use it
+
+catbus may be useful when you have a library of archives like application builds that
+you need to transport to a fleet of hosts in a network efficient manner. By pre-computing
+the archives from local parts we trade CPU for network bandwidth.
+
+A minimal set of parts is then transported to each host requesting the archive based on
+the parts they need. A new host with no local parts will simply request the entire archive.
+
+This is similar to how git negotiates the objects needed for a fetch but with a simpler
+replacement for repacking the object database over time. Instead, old parts are pruned
+when the transport cache is expired on a first in first out basis based on age.
