@@ -17,10 +17,8 @@ constructing an archive on the remote end from previously received tar archives.
 
 _Generated using https://sequencediagram.org/_
 
-1. An index of each tarball is precomputed and stored beside the tar archives.
-  1. `catbus index` is used to generate the index files.
-1. A receiver invokes `catbus transport receive-index` connected to a sender `catbus transport upload-index`
-  1. A reliable transport is assumed, such as SSH tunnels.
+1. An index of the tar archive to be transport is precomputed and stored beside the tar archives using `catbus index`.
+1. A receiver invokes `catbus transport receive-index` connected to a sender `catbus transport upload-index`. A reliable transport is assumed, such as SSH tunnels.
 1. The sender writes the index to the receiver
 1. The receiver tries to source the parts from the previously received local library of parts
 1. The receiver requests missing parts from the sender
