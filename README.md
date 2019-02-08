@@ -13,7 +13,7 @@ constructing an archive on the remote end from previously received tar archives.
 
 ## How it works
 
-![](protocol.png]
+![](protocol.png)
 
 _Generated using https://sequencediagram.org/_
 
